@@ -79,11 +79,23 @@ def _patch_evidence_annotation(best_row_flags: Any, reporting: Any) -> None:
             .eq(reporting_module.EXACT_EVIDENCE_SUPPORT)
             .to_numpy(bool)
         )
+        source_truncated = (
+            classified["evidence_support"]
+            .astype(str)
+            .eq(reporting_module.TRUNCATED_EVIDENCE_SUPPORT)
+            .to_numpy(bool)
+        )
         recoverable_negative_infinite = (
             source_negative_infinite & source_success & source_exact
         )
+        recoverable_truncated_negative_infinite = (
+            source_negative_infinite & source_success & source_truncated
+        )
         comparable_row_ids = classified.loc[
             recoverable_negative_infinite, row_id_column
+        ].tolist()
+        truncated_row_ids = classified.loc[
+            recoverable_truncated_negative_infinite, row_id_column
         ].tolist()
 
         annotated = current(prepared, reporting_module)
@@ -94,10 +106,12 @@ def _patch_evidence_annotation(best_row_flags: Any, reporting: Any) -> None:
             negative_ids = annotated[row_id_column].isin(comparable_row_ids)
             annotated.loc[negative_ids, "evidence_comparable"] = True
 
+        if comparable_row_ids or truncated_row_ids:
             # When at least one exact model has finite evidence, ``-inf`` exact
             # rows have exactly zero posterior model probability and ``-inf``
-            # relative evidence. The finite-model probabilities already sum to
-            # one because zero-mass models contribute nothing to the normalizer.
+            # relative evidence. Likewise, a ``-inf`` truncated lower bound is
+            # the zero-mass member of its lower-bound comparison whenever another
+            # truncated model has finite evidence.
             for _, group in best_row_flags._iter_event_groups(annotated):
                 log_values = _real_log_evidence_values(group["log_evidence"])
                 comparable = reporting_module._coerce_bool_series(
@@ -216,13 +230,26 @@ def _certified_vs_exact_event_recovery(
         best_comparable_model = ""
         best_comparable_log_evidence = np.nan
         if not comparable_rows.empty:
-            best_comparable_row = best_row_flags._best_log_evidence_row(
-                comparable_rows
+            comparable_values = _real_log_evidence_values(
+                comparable_rows["log_evidence"]
             )
-            best_comparable_model = str(best_comparable_row["model"])
-            best_comparable_log_evidence = float(
-                best_comparable_row["log_evidence"]
-            )
+            finite_positions = np.flatnonzero(np.isfinite(comparable_values))
+            if finite_positions.size:
+                best_position = int(
+                    finite_positions[
+                        np.argmax(comparable_values[finite_positions])
+                    ]
+                )
+                best_comparable_row = comparable_rows.iloc[best_position]
+                best_comparable_model = str(best_comparable_row["model"])
+                best_comparable_log_evidence = float(
+                    best_comparable_row["log_evidence"]
+                )
+            elif np.all(np.isneginf(comparable_values)):
+                # All exact-comparable models assign zero evidence. Preserve the
+                # exact reference value for lower-bound certification, but do not
+                # manufacture a winning model from row order.
+                best_comparable_log_evidence = float("-inf")
 
         acceptable_models = recovery._event_acceptable_recovery_models(group)
         acceptable_rows = scored[
@@ -282,7 +309,17 @@ def _certified_vs_exact_event_recovery(
             best_comparable_log_evidence,
         )
 
-        if (
+        all_comparable_impossible = bool(
+            expected_comparable
+            and not comparable_rows.empty
+            and best_comparable_row is None
+            and np.isneginf(best_comparable_log_evidence)
+        )
+
+        if all_comparable_impossible:
+            recovered = False
+            reason = "all_comparable_impossible"
+        elif (
             best_comparable_row is not None
             and best_comparable_model in acceptable_models
         ):

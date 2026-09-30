@@ -539,14 +539,18 @@ def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
 
 
 def _resolved_best_log_evidence_row(frame: pd.DataFrame) -> pd.Series | None:
-    """Return a best row only when at least one model has nonzero evidence."""
+    """Return the evidence-defined best row, preserving a sole impossible model."""
 
     if frame.empty:
         return None
     values = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(float)
     finite_positions = np.flatnonzero(np.isfinite(values))
     if finite_positions.size == 0:
-        return None
+        # A single scored model remains unambiguous even at zero evidence.
+        # With multiple distinct zero-evidence models, however, row order must
+        # not manufacture a winner.
+        models = frame["model"].dropna().astype(str).unique()
+        return frame.iloc[0] if len(models) == 1 else None
     best_position = int(finite_positions[np.argmax(values[finite_positions])])
     return frame.iloc[best_position]
 

@@ -296,8 +296,6 @@ def test_load_event_scores_preserves_negative_infinite_exact_evidence(tmp_path):
     assert bool(event["trajectory_strict_win"])
 
 
-
-
 def test_all_impossible_event_is_unresolved_in_paper_effect_summary(tmp_path):
     scores = tmp_path / "event_model_evidence.csv"
     output = tmp_path / "paper-all-impossible"

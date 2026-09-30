@@ -183,24 +183,40 @@ def _safe_float(value: object) -> float:
     return out if np.isfinite(out) else float("nan")
 
 
+def _evidence_float(value: object) -> float:
+    """Return usable log evidence, preserving valid zero-mass negative infinity."""
+
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return float("nan") if np.isnan(out) or np.isposinf(out) else out
+
+
 def _finite_delta(left: object, right: object) -> float:
-    left_value = _safe_float(left)
-    right_value = _safe_float(right)
-    if not np.isfinite(left_value) or not np.isfinite(right_value):
+    left_value = _evidence_float(left)
+    right_value = _evidence_float(right)
+    if np.isnan(left_value) or np.isnan(right_value):
+        return float("nan")
+    if np.isneginf(left_value) and np.isneginf(right_value):
         return float("nan")
     return float(left_value - right_value)
 
 
-def _finite_max(values: list[object]) -> tuple[str, float]:
-    best_model = ""
-    best_value = float("nan")
+def _finite_max(values: list[tuple[object, object]]) -> tuple[str, float]:
+    usable: list[tuple[str, float]] = []
     for model, value in values:
-        numeric = _safe_float(value)
-        if not np.isfinite(numeric):
-            continue
-        if not best_model or numeric > best_value:
-            best_model = str(model)
-            best_value = numeric
+        numeric = _evidence_float(value)
+        if not np.isnan(numeric):
+            usable.append((str(model), numeric))
+    if not usable:
+        return "", float("nan")
+    best_value = max(value for _, value in usable)
+    if np.isneginf(best_value):
+        # Every usable model assigns exactly zero evidence, so there is no
+        # defined winner even though the common log evidence remains valid.
+        return "", best_value
+    best_model = next(model for model, value in usable if value == best_value)
     return best_model, best_value
 
 
@@ -218,6 +234,11 @@ def normalize_event_model_evidence(frame: pd.DataFrame) -> pd.DataFrame:
         frame = frame[frame["status"].map(_status_success)].copy()
     if "evidence_comparable" in frame.columns:
         frame = frame[frame["evidence_comparable"].map(_as_bool)].copy()
+    log_evidence = pd.to_numeric(frame["log_evidence"], errors="coerce").astype(float)
+    evidence_values = log_evidence.to_numpy()
+    usable_evidence = ~(np.isnan(evidence_values) | np.isposinf(evidence_values))
+    frame = frame.loc[usable_evidence].copy()
+    frame["log_evidence"] = log_evidence.loc[frame.index]
     frame["session"] = frame["session"].astype(str)
     frame["event_index"] = _normalize_event_index(frame["event_index"])
     frame["model"] = frame["model"].astype(str)
@@ -278,11 +299,11 @@ def build_event_table(evidence: pd.DataFrame, *, margin_threshold: float) -> pd.
         row["trajectory_confident_claim"] = bool(row["delta_trajectory_minus_stationary"] >= margin_threshold)
         row["stationary_confident_claim"] = bool(row["delta_trajectory_minus_stationary"] <= -margin_threshold)
         row["delta_imm_minus_fragmented"] = _finite_delta(row["logZ_first_order_imm"], row["logZ_fragmented"])
-        row["imm_raw_win"] = bool(row["delta_imm_minus_fragmented"] > 0.0) if np.isfinite(row["delta_imm_minus_fragmented"]) else False
+        row["imm_raw_win"] = bool(row["delta_imm_minus_fragmented"] > 0.0) if not np.isnan(row["delta_imm_minus_fragmented"]) else False
         row["imm_confident_win_at_threshold"] = bool(row["delta_imm_minus_fragmented"] >= margin_threshold)
         row["fragmented_confident_win_at_threshold"] = bool(row["delta_imm_minus_fragmented"] <= -margin_threshold)
         row["delta_momentum_minus_diffusion"] = _finite_delta(row["logZ_momentum"], row["logZ_diffusion"])
-        row["momentum_raw_win_vs_diffusion"] = bool(row["delta_momentum_minus_diffusion"] > 0.0) if np.isfinite(row["delta_momentum_minus_diffusion"]) else False
+        row["momentum_raw_win_vs_diffusion"] = bool(row["delta_momentum_minus_diffusion"] > 0.0) if not np.isnan(row["delta_momentum_minus_diffusion"]) else False
         row["momentum_confident_win_vs_diffusion"] = bool(row["delta_momentum_minus_diffusion"] >= margin_threshold)
         rows.append(row)
 
@@ -512,12 +533,16 @@ def build_imm_vs_fragmented_audit(events: pd.DataFrame, *, margin_threshold: flo
 
 
 def _within_family_classification(row: pd.Series, threshold: float) -> str:
-    delta = _safe_float(row.get("delta_imm_minus_fragmented"))
-    if str(row.get("best_model")) == "first_order_imm" and np.isfinite(delta) and delta >= threshold:
+    try:
+        delta = float(row.get("delta_imm_minus_fragmented"))
+    except (TypeError, ValueError):
+        delta = float("nan")
+    usable = not np.isnan(delta)
+    if str(row.get("best_model")) == "first_order_imm" and usable and delta >= threshold:
         return "clean_imm_candidate"
-    if str(row.get("best_model")) == "fragmented" and np.isfinite(delta) and delta <= -threshold:
+    if str(row.get("best_model")) == "fragmented" and usable and delta <= -threshold:
         return "fragmented_candidate"
-    if np.isfinite(delta) and abs(delta) < threshold:
+    if usable and abs(delta) < threshold:
         return "imm_fragmented_ambiguous"
     return "trajectory_family_other"
 

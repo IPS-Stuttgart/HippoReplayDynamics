@@ -1,9 +1,13 @@
 {
-  "status": "draft_not_sent",
+  "status": "draft_under_user_review",
+  "sending_approved": false,
+  "review_requested_on": "2026-10-01",
+  "user_instruction": "Keep it unsent; revise or review first",
   "sent_at_utc": null,
   "clarification_rounds": 0,
-  "feasibility_working_days_used": 1,
+  "feasibility_working_days_used": 2,
   "working_day_ledger": [
-    {"date": "2026-09-30", "activity": "Implementation and feasibility preparation; no drug contrast opened"}
+    {"date": "2026-09-30", "activity": "Implementation and feasibility preparation; no drug contrast opened"},
+    {"date": "2026-10-01", "activity": "Server access recheck and metadata-request review; user requested no sending; no drug contrast opened"}
   ]
 }

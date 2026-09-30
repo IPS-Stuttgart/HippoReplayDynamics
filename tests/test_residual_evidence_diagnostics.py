@@ -5,6 +5,7 @@ import pandas as pd
 
 from hipporeplayimm.advanced_result_diagnostics import (
     model_disagreement_events,
+    rat_bootstrap_wrong_map_absolute_evidence_summary,
     wrong_map_absolute_evidence_deltas,
     wrong_map_delta_summary,
 )
@@ -106,3 +107,28 @@ def test_model_disagreement_uses_comparable_evidence_and_keeps_impossible_unreso
     assert out.loc[0, "best_model_by_evidence"] == "exact"
     assert out.loc[1, "best_model"] == ""
     assert out.loc[1, "best_model_by_evidence"] == ""
+
+
+
+def test_wrong_map_bootstrap_keeps_all_infinite_attenuation_defined() -> None:
+    deltas = pd.DataFrame(
+        {
+            "session": ["Rat1/Open1", "Rat2/Open1"],
+            "statistic": ["fixed_model", "fixed_model"],
+            "selected_model": ["m", "m"],
+            "delta_map_log_evidence": [float("inf"), float("inf")],
+        }
+    )
+
+    out = rat_bootstrap_wrong_map_absolute_evidence_summary(
+        deltas,
+        n_bootstrap=8,
+        random_seed=3,
+    ).iloc[0]
+
+    assert np.isposinf(out["observed_mean_delta_map_log_evidence"])
+    assert np.isposinf(out["mean_delta_ci95_low"])
+    assert np.isposinf(out["mean_delta_ci95_high"])
+    assert np.isposinf(out["median_delta_ci95_low"])
+    assert np.isposinf(out["median_delta_ci95_high"])
+    assert out["probability_mean_delta_gt_0"] == 1.0

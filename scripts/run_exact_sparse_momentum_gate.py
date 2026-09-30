@@ -543,16 +543,11 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
             first.get("expected_exact_surrogate_model", expected_model)
         )
         best_model = _event_best_model(group)
-        recovered_expected = _event_bool(
-            group,
-            "recovered_expected_model",
-            fallback=best_model == expected_model,
-        )
-        exact_surrogate_recovered = _event_bool(
-            group,
-            "exact_surrogate_recovered_expected_model",
-            fallback=best_model == surrogate_model,
-        )
+        # Recompute recovery from the currently usable exact-comparable evidence.
+        # Serialized recovery flags may come from an older aggregation pass and can
+        # otherwise preserve a fabricated winner for an all-impossible event.
+        recovered_expected = bool(best_model and best_model == expected_model)
+        exact_surrogate_recovered = bool(best_model and best_model == surrogate_model)
         rows.append(
             {
                 "session": session,
@@ -599,18 +594,22 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def _event_best_model(group: pd.DataFrame) -> str:
-    if "best_model" in group:
-        values = group["best_model"].dropna().astype(str)
-        values = values[values.str.len() > 0]
-        if not values.empty:
-            return str(values.iloc[0])
+    """Return the evidence-defined best comparable model, or empty if unresolved."""
+
     scored = _successful_finite_rows(group)
     if "evidence_comparable" in scored:
         scored = scored[_bool_series(scored["evidence_comparable"])]
     if scored.empty:
         return ""
-    values = pd.to_numeric(scored["log_evidence"], errors="coerce")
-    return str(scored.iloc[int(values.argmax())]["model"])
+    values = pd.to_numeric(scored["log_evidence"], errors="coerce").to_numpy(float)
+    finite_positions = np.flatnonzero(np.isfinite(values))
+    if finite_positions.size == 0:
+        # Every comparable model assigns exactly zero evidence.  There is no
+        # evidence-defined winner; row order or a serialized best_model value
+        # must not manufacture one.
+        return ""
+    best_position = int(finite_positions[np.argmax(values[finite_positions])])
+    return str(scored.iloc[best_position]["model"])
 
 
 def _valid_log_evidence(value: object) -> float:

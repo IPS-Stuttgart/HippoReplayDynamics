@@ -235,6 +235,44 @@ def test_noncomparable_trajectory_imm_rows_cannot_satisfy_promotion_or_readiness
     assert not bool(readiness["interpretability_ready"])
 
 
+def test_all_negative_infinite_core_evidence_has_no_arbitrary_winner_or_rank():
+    required = (DEFAULT_FIRST_ORDER_IMM_MODEL, DEFAULT_TRAJECTORY_IMM_MODEL)
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", 0, DEFAULT_FIRST_ORDER_IMM_MODEL, float("-inf")),
+            row("Rat1/Open1", 0, DEFAULT_TRAJECTORY_IMM_MODEL, float("-inf")),
+        ]
+    )
+
+    pair = trajectory_imm_event_pairs(scores, required_core_models=required).iloc[0]
+
+    assert bool(pair["required_core_complete"])
+    assert pair["best_exact_core_model"] == ""
+    assert pd.isna(pair["best_exact_core_log_evidence"])
+    assert pd.isna(pair["trajectory_imm_rank_in_required_core"])
+    assert pd.isna(pair["delta_trajectory_imm_minus_first_order_imm"])
+    assert not bool(pair["trajectory_imm_raw_best_exact_core"])
+    assert not bool(pair["first_order_imm_raw_best_exact_core"])
+
+
+def test_positive_infinite_evidence_is_not_treated_as_successful_comparable_evidence():
+    required = (DEFAULT_FIRST_ORDER_IMM_MODEL, DEFAULT_TRAJECTORY_IMM_MODEL)
+    scores = pd.DataFrame(
+        [
+            row("Rat1/Open1", 0, DEFAULT_FIRST_ORDER_IMM_MODEL, 10.0),
+            row("Rat1/Open1", 0, DEFAULT_TRAJECTORY_IMM_MODEL, float("inf")),
+        ]
+    )
+
+    pair = trajectory_imm_event_pairs(scores, required_core_models=required).iloc[0]
+
+    assert not bool(pair["required_core_complete"])
+    assert DEFAULT_TRAJECTORY_IMM_MODEL in pair["missing_required_core_models"]
+    assert pd.isna(pair["trajectory_imm_log_evidence"])
+    assert pair["best_exact_core_model"] == DEFAULT_FIRST_ORDER_IMM_MODEL
+    assert pair["best_exact_core_log_evidence"] == 10.0
+
+
 def test_rat_bootstrap_reports_positive_intervals_for_strong_rows():
     scores = pd.DataFrame(
         [

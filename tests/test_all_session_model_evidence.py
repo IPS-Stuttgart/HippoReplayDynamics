@@ -80,8 +80,10 @@ def test_all_session_model_evidence_workflow_exports_expected_outputs():
     assert "state_space_momentum_initial_sigma_cm_sqrt_s:" in workflow
     assert (
         "STATE_SPACE_MOMENTUM_INITIAL_SIGMA_CM_SQRT_S: "
-        "${{ inputs.state_space_momentum_initial_sigma_cm_sqrt_s }}"
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.state_space_momentum_initial_sigma_cm_sqrt_s || '85.0' }}"
     ) in workflow
+    assert '"docs/model_evidence_refresh_trigger.txt"' in workflow
     assert "--state-space-momentum-initial-sigma-cm-sqrt-s" in workflow
     assert 'CLUSTERLESS_MARK_SMOOTHING_SIGMA_BINS: "1.0"' in workflow
     assert "--clusterless-mark-smoothing-sigma-bins" in workflow

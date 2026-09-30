@@ -543,16 +543,11 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
             first.get("expected_exact_surrogate_model", expected_model)
         )
         best_model = _event_best_model(group)
-        recovered_expected = _event_bool(
-            group,
-            "recovered_expected_model",
-            fallback=best_model == expected_model,
-        )
-        exact_surrogate_recovered = _event_bool(
-            group,
-            "exact_surrogate_recovered_expected_model",
-            fallback=best_model == surrogate_model,
-        )
+        # Recompute recovery from the actual comparable evidence instead of
+        # trusting serialized winner flags. Historical score files can contain
+        # stale best_model/recovery columns from older winner-selection logic.
+        recovered_expected = bool(best_model and best_model == expected_model)
+        exact_surrogate_recovered = bool(best_model and best_model == surrogate_model)
         rows.append(
             {
                 "session": session,
@@ -599,18 +594,18 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
 
 
 def _event_best_model(group: pd.DataFrame) -> str:
-    if "best_model" in group:
-        values = group["best_model"].dropna().astype(str)
-        values = values[values.str.len() > 0]
-        if not values.empty:
-            return str(values.iloc[0])
     scored = _successful_finite_rows(group)
     if "evidence_comparable" in scored:
         scored = scored[_bool_series(scored["evidence_comparable"])]
     if scored.empty:
         return ""
-    values = pd.to_numeric(scored["log_evidence"], errors="coerce")
-    return str(scored.iloc[int(values.argmax())]["model"])
+    evidence = pd.to_numeric(scored["log_evidence"], errors="coerce").to_numpy(dtype=float)
+    if not np.any(np.isfinite(evidence)):
+        # If every comparable model assigns exactly zero evidence (-inf), the
+        # event is unresolved. np.argmax would otherwise fabricate a winner
+        # from row order.
+        return ""
+    return str(scored.iloc[int(np.argmax(evidence))]["model"])
 
 
 def _valid_log_evidence(value: object) -> float:

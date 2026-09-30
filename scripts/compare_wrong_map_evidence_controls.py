@@ -134,7 +134,27 @@ def _success_rows(frame: pd.DataFrame) -> pd.DataFrame:
             out[column] = out[column].map(_decoded_text)
     out["event_index"] = out["event_index"].map(_exact_event_index)
     out["log_evidence"] = pd.to_numeric(out["log_evidence"], errors="coerce")
-    return out.dropna(subset=["log_evidence"])
+    evidence = out["log_evidence"].to_numpy(dtype=float)
+    if np.any(np.isposinf(evidence)):
+        raise ValueError("wrong-map log_evidence must be finite or -inf")
+    return out.loc[~np.isnan(evidence)].copy()
+
+
+def _collapse_model_rows(frame: pd.DataFrame, key_columns: tuple[str, ...]) -> pd.DataFrame:
+    """Keep the highest-evidence row for duplicate event/model keys."""
+
+    if frame.empty:
+        return frame.copy()
+    missing = [column for column in key_columns if column not in frame]
+    if missing:
+        raise ValueError(f"wrong-map evidence is missing duplicate-key columns: {missing}")
+    out = frame.copy()
+    out["_source_row_order"] = np.arange(len(out), dtype=int)
+    sort_columns = [*key_columns, "log_evidence", "_source_row_order"]
+    ascending = [True] * len(key_columns) + [False, True]
+    out = out.sort_values(sort_columns, ascending=ascending, kind="mergesort")
+    out = out.drop_duplicates(list(key_columns), keep="first")
+    return out.drop(columns=["_source_row_order"]).reset_index(drop=True)
 
 
 def _read_evidence(path: str | Path) -> pd.DataFrame:
@@ -150,14 +170,27 @@ def _model_value(group: pd.DataFrame, model: str) -> float:
     row = group[group["model"].astype(str).eq(str(model))]
     if row.empty:
         return float("nan")
-    return float(row.iloc[-1]["log_evidence"])
+    values = pd.to_numeric(row["log_evidence"], errors="coerce").dropna()
+    return float(values.max()) if not values.empty else float("nan")
 
 
 def _best_model(group: pd.DataFrame, model_set: set[str]) -> tuple[str, float]:
-    subset = group[group["model"].astype(str).isin(model_set)].dropna(subset=["log_evidence"])
+    subset = group[group["model"].astype(str).isin(model_set)].dropna(subset=["log_evidence"]).copy()
     if subset.empty:
         return "", float("nan")
-    row = subset.sort_values("log_evidence", ascending=False).iloc[0]
+    evidence = pd.to_numeric(subset["log_evidence"], errors="coerce").to_numpy(dtype=float)
+    if np.any(np.isposinf(evidence)):
+        raise ValueError("wrong-map log_evidence must be finite or -inf")
+    usable = ~np.isnan(evidence)
+    subset = subset.loc[usable].copy()
+    if subset.empty:
+        return "", float("nan")
+    subset["log_evidence"] = evidence[usable]
+    if not np.any(np.isfinite(subset["log_evidence"].to_numpy(dtype=float))):
+        # All candidate models assign exactly zero evidence. There is no
+        # evidence-defined winner, so keep the comparison unresolved.
+        return "", float("nan")
+    row = subset.sort_values(["log_evidence", "model"], ascending=[False, True]).iloc[0]
     return str(row["model"]), float(row["log_evidence"])
 
 
@@ -166,12 +199,14 @@ def wrong_map_model_evidence_attenuation(real: pd.DataFrame, wrong: pd.DataFrame
 
     real_ok = _success_rows(real)
     wrong_ok = _success_rows(wrong)
-    wrong_cols = ["session", "event_index", "model", "log_evidence"]
-    if "map_session" in wrong_ok.columns:
-        wrong_cols.append("map_session")
-    else:
+    if "map_session" not in wrong_ok.columns:
         wrong_ok["map_session"] = ""
-        wrong_cols.append("map_session")
+    real_ok = _collapse_model_rows(real_ok, ("session", "event_index", "model"))
+    wrong_ok = _collapse_model_rows(
+        wrong_ok,
+        ("session", "event_index", "map_session", "model"),
+    )
+    wrong_cols = ["session", "event_index", "model", "log_evidence", "map_session"]
     if "requested_model" in wrong_ok.columns:
         wrong_cols.append("requested_model")
 
@@ -184,9 +219,13 @@ def wrong_map_model_evidence_attenuation(real: pd.DataFrame, wrong: pd.DataFrame
     if "requested_model" not in merged:
         merged["requested_model"] = merged["model"]
     merged["rat"] = merged["session"].map(_rat_from_session)
-    merged["real_minus_wrong_log_evidence"] = (
-        merged["log_evidence_real_map"].astype(float) - merged["log_evidence_wrong_map"].astype(float)
-    )
+    real_evidence = merged["log_evidence_real_map"].to_numpy(dtype=float)
+    wrong_evidence = merged["log_evidence_wrong_map"].to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        delta = real_evidence - wrong_evidence
+    both_impossible = np.isneginf(real_evidence) & np.isneginf(wrong_evidence)
+    delta[both_impossible] = 0.0
+    merged["real_minus_wrong_log_evidence"] = delta
     merged["real_map_better"] = merged["real_minus_wrong_log_evidence"] > 0.0
     ordered = [
         "rat",
@@ -298,6 +337,11 @@ def wrong_map_family_evidence_attenuation(
     if "map_session" not in wrong_ok.columns:
         wrong_ok = wrong_ok.copy()
         wrong_ok["map_session"] = ""
+    real_ok = _collapse_model_rows(real_ok, ("session", "event_index", "model"))
+    wrong_ok = _collapse_model_rows(
+        wrong_ok,
+        ("session", "event_index", "map_session", "model"),
+    )
     required = tuple(str(model) for model in required_models)
     required_set = set(required)
     trajectory_set = set(str(model) for model in trajectory_models)

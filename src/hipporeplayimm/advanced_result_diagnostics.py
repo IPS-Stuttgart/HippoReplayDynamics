@@ -545,16 +545,38 @@ def wrong_map_delta_summary(
     )
     if merged.empty:
         return merged
-    merged["delta_vs_wrong_environment_map"] = (
-        merged[f"{evidence_col}_current_map"] - merged[f"{evidence_col}_wrong_map"]
+    current_col = f"{evidence_col}_current_map"
+    wrong_col = f"{evidence_col}_wrong_map"
+    current_values = pd.to_numeric(merged[current_col], errors="coerce").to_numpy(dtype=float)
+    wrong_values = pd.to_numeric(merged[wrong_col], errors="coerce").to_numpy(dtype=float)
+    usable = ~(
+        np.isnan(current_values)
+        | np.isposinf(current_values)
+        | np.isnan(wrong_values)
+        | np.isposinf(wrong_values)
     )
+    merged = merged.loc[usable].copy()
+    if merged.empty:
+        return merged
+    current_values = current_values[usable]
+    wrong_values = wrong_values[usable]
+    merged[current_col] = current_values
+    merged[wrong_col] = wrong_values
+    with np.errstate(invalid="ignore"):
+        delta = current_values - wrong_values
+    both_impossible = np.isneginf(current_values) & np.isneginf(wrong_values)
+    delta[both_impossible] = 0.0
+    merged["delta_vs_wrong_environment_map"] = delta
+
     event_keys = [column for column in key_cols if column != "model"]
     best_wrong = (
-        merged.sort_values(f"{evidence_col}_wrong_map", ascending=False)
+        merged.sort_values([*event_keys, wrong_col, "model"], ascending=[True] * len(event_keys) + [False, True], kind="stable")
         .drop_duplicates(event_keys, keep="first")
-        [event_keys + ["model"]]
+        [event_keys + ["model", wrong_col]]
         .rename(columns={"model": "wrong_map_best_model"})
     )
+    best_wrong.loc[np.isneginf(best_wrong[wrong_col].to_numpy(dtype=float)), "wrong_map_best_model"] = ""
+    best_wrong = best_wrong.drop(columns=[wrong_col])
     return merged.merge(best_wrong, on=event_keys, how="left")
 
 
@@ -631,7 +653,19 @@ def wrong_map_absolute_evidence_deltas(
             available = [model for model in candidate_models if model in by_model.index]
             if not available:
                 continue
-            selected = str(by_model.loc[available, f"{evidence_col}_real_map"].astype(float).idxmax())
+            candidate_values = pd.to_numeric(
+                by_model.loc[available, f"{evidence_col}_real_map"],
+                errors="coerce",
+            )
+            candidate_array = candidate_values.to_numpy(dtype=float)
+            usable = ~(np.isnan(candidate_array) | np.isposinf(candidate_array))
+            candidate_values = candidate_values.iloc[np.flatnonzero(usable)]
+            if candidate_values.empty or not np.any(np.isfinite(candidate_values.to_numpy(dtype=float))):
+                # If every candidate assigns zero evidence (-inf), there is no
+                # evidence-defined real-map winner to carry into the wrong-map
+                # comparison.
+                continue
+            selected = str(candidate_values.idxmax())
             selected_row = by_model.loc[selected].copy()
             for column, value in zip(group_cols, key_tuple, strict=True):
                 selected_row[column] = value
@@ -824,10 +858,20 @@ def wrong_map_family_margin_difference_in_differences(
             available = [model for model in exact_trajectory_models if model in by_model.index]
             if not available:
                 continue
-            best_trajectory_model = str(by_model.loc[available, evidence_col].astype(float).idxmax())
-            margin = float(by_model.loc[best_trajectory_model, evidence_col]) - float(
-                by_model.loc[nontrajectory_model, evidence_col]
+            trajectory_values = pd.to_numeric(by_model.loc[available, evidence_col], errors="coerce")
+            trajectory_array = trajectory_values.to_numpy(dtype=float)
+            usable = ~(np.isnan(trajectory_array) | np.isposinf(trajectory_array))
+            trajectory_values = trajectory_values.iloc[np.flatnonzero(usable)]
+            if trajectory_values.empty or not np.any(np.isfinite(trajectory_values.to_numpy(dtype=float))):
+                # All-impossible trajectory candidates do not define a winner.
+                continue
+            nontrajectory_value = float(
+                pd.to_numeric(pd.Series([by_model.loc[nontrajectory_model, evidence_col]]), errors="coerce").iloc[0]
             )
+            if np.isnan(nontrajectory_value) or np.isposinf(nontrajectory_value):
+                continue
+            best_trajectory_model = str(trajectory_values.idxmax())
+            margin = float(trajectory_values.loc[best_trajectory_model]) - nontrajectory_value
             row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
             row[f"{prefix}_best_trajectory_model"] = best_trajectory_model
             row[f"{prefix}_trajectory_minus_nontrajectory_log_evidence"] = margin
@@ -899,6 +943,10 @@ def _wrong_map_delta_row(
 ) -> dict[str, object]:
     real_value = float(row[f"{evidence_col}_real_map"])
     wrong_value = float(row[f"{evidence_col}_wrong_map"])
+    if np.isneginf(real_value) and np.isneginf(wrong_value):
+        delta = 0.0
+    else:
+        delta = real_value - wrong_value
     return {
         **{column: row[column] for column in group_cols},
         "statistic": statistic,
@@ -906,7 +954,7 @@ def _wrong_map_delta_row(
         "selected_model": selected_model or str(row[model_col]),
         "log_evidence_real_map": real_value,
         "log_evidence_wrong_map": wrong_value,
-        "delta_map_log_evidence": real_value - wrong_value,
+        "delta_map_log_evidence": delta,
         "map_session": str(row["map_session"]) if "map_session" in row.index else "",
     }
 

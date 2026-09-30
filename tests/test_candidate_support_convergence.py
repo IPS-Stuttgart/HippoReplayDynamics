@@ -223,3 +223,79 @@ def test_candidate_support_convergence_preserves_decimal_form_large_event_ids(tm
     agreement = pd.read_csv(out / "candidate_support_best_model_agreement.csv")
     assert int(delta.loc[0, "events"]) == 2
     assert int(agreement.loc[0, "events"]) == 2
+
+
+def test_evidence_delta_summary_keeps_matching_impossible_evidence() -> None:
+    model = "sorted-spike-state-space-momentum"
+    left = pd.DataFrame(
+        [
+            {
+                "run_label": "k64",
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": model,
+                "log_evidence": float("-inf"),
+                "evidence_support": "exact_full_grid",
+            }
+        ]
+    )
+    right = left.copy()
+    right["run_label"] = "k128"
+
+    summary = evidence_delta_summary([left, right])
+
+    assert summary.shape[0] == 1
+    row = summary.iloc[0]
+    assert int(row["events"]) == 1
+    assert float(row["mean_delta_b_minus_a"]) == pytest.approx(0.0)
+    assert float(row["mean_abs_delta"]) == pytest.approx(0.0)
+    assert float(row["max_abs_delta"]) == pytest.approx(0.0)
+
+
+def test_best_model_agreement_ignores_all_impossible_event_order() -> None:
+    diffusion = "sorted-spike-state-space-diffusion"
+    momentum = "sorted-spike-state-space-momentum"
+
+    def run(label: str, impossible_order: tuple[str, str]) -> pd.DataFrame:
+        rows = [
+            {
+                "run_label": label,
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": diffusion,
+                "log_evidence": 1.0,
+                "evidence_support": "exact_full_grid",
+            },
+            {
+                "run_label": label,
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": momentum,
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+            },
+        ]
+        rows.extend(
+            {
+                "run_label": label,
+                "session": "Rat1/Open1",
+                "event_index": 1,
+                "model": model,
+                "log_evidence": float("-inf"),
+                "evidence_support": "exact_full_grid",
+            }
+            for model in impossible_order
+        )
+        return pd.DataFrame(rows)
+
+    left = run("k64", (diffusion, momentum))
+    right = run("k128", (momentum, diffusion))
+
+    agreement = best_model_agreement([left, right])
+
+    assert agreement.shape[0] == 1
+    row = agreement.iloc[0]
+    assert int(row["events"]) == 1
+    assert int(row["best_model_agreements"]) == 1
+    assert int(row["best_model_disagreements"]) == 0
+    assert float(row["best_model_agreement_fraction"]) == pytest.approx(1.0)

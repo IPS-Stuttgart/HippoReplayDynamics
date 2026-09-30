@@ -311,7 +311,20 @@ def evidence_delta_summary(runs: list[pd.DataFrame]) -> pd.DataFrame:
         )
         if merged.empty:
             continue
-        merged["delta_b_minus_a"] = merged["log_evidence_b"] - merged["log_evidence_a"]
+        for column in ("log_evidence_a", "log_evidence_b"):
+            merged[column] = pd.to_numeric(merged[column], errors="coerce")
+            if np.any(np.isposinf(merged[column].to_numpy(dtype=float))):
+                raise ValueError("Candidate-support log_evidence must be finite or -inf")
+        left_evidence = merged["log_evidence_a"].to_numpy(dtype=float)
+        right_evidence = merged["log_evidence_b"].to_numpy(dtype=float)
+        with np.errstate(invalid="ignore"):
+            delta = right_evidence - left_evidence
+        # Two exact zero-evidence values are semantically identical. The raw
+        # floating-point subtraction -inf - -inf is NaN, which previously made
+        # a stable all-impossible event silently disappear from this audit.
+        both_impossible = np.isneginf(left_evidence) & np.isneginf(right_evidence)
+        delta[both_impossible] = 0.0
+        merged["delta_b_minus_a"] = delta
         merged["abs_delta"] = merged["delta_b_minus_a"].abs()
         group_cols = ["model", "evidence_support_a", "evidence_support_b"]
         for (model, support_a, support_b), group in merged.groupby(group_cols, dropna=False, sort=True):
@@ -346,10 +359,31 @@ def _best_model_by_event(
     alignment_columns: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     columns = tuple(alignment_columns or _alignment_columns(frame))
-    subset = frame[frame["model"].astype(str).isin(allowed_models)].dropna(subset=["log_evidence"])
+    subset = frame[frame["model"].astype(str).isin(allowed_models)].copy()
+    subset["log_evidence"] = pd.to_numeric(subset["log_evidence"], errors="coerce")
+    evidence = subset["log_evidence"].to_numpy(dtype=float)
+    if np.any(np.isposinf(evidence)):
+        raise ValueError("Candidate-support log_evidence must be finite or -inf")
+    subset = subset.loc[~subset["log_evidence"].isna()].copy()
     if subset.empty:
         return pd.DataFrame(columns=[*columns, "best_model"])
-    best_indices = subset.groupby(list(columns), sort=False)["log_evidence"].idxmax()
+
+    # A group in which every model assigns exactly zero evidence has no
+    # evidence-defined best model. idxmax would otherwise pick whichever row
+    # happened to appear first, making convergence depend on CSV row order.
+    subset["_finite_log_evidence"] = np.isfinite(
+        subset["log_evidence"].to_numpy(dtype=float)
+    )
+    resolvable = subset.groupby(
+        list(columns), sort=False, dropna=False
+    )["_finite_log_evidence"].transform("any")
+    subset = subset.loc[resolvable].drop(columns=["_finite_log_evidence"])
+    if subset.empty:
+        return pd.DataFrame(columns=[*columns, "best_model"])
+
+    best_indices = subset.groupby(
+        list(columns), sort=False, dropna=False
+    )["log_evidence"].idxmax()
     return subset.loc[best_indices, [*columns, "model"]].rename(
         columns={"model": "best_model"}
     )

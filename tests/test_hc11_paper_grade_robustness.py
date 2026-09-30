@@ -6,6 +6,7 @@ import pytest
 
 from scripts.report_hc11_paper_grade_robustness import (
     build_event_table,
+    build_imm_vs_fragmented_audit,
     build_posterior_content_audit,
     normalize_event_model_evidence,
     read_event_model_evidence,
@@ -181,6 +182,81 @@ def test_hc11_reader_canonicalizes_short_and_long_model_names(tmp_path: Path) ->
     assert row["best_model"] == "first_order_imm"
     assert row["trajectory_confident_claim"]
     assert row["momentum_raw_win_vs_diffusion"]
+
+
+def test_hc11_report_preserves_negative_infinite_evidence() -> None:
+    evidence = normalize_event_model_evidence(
+        pd.DataFrame(
+            _event(
+                "Achilles/day1",
+                0,
+                stationary=-np.inf,
+                diffusion=-np.inf,
+                fragmented=-np.inf,
+                first_order=2.0,
+                momentum=1.0,
+            )
+        )
+    )
+
+    events = build_event_table(evidence, margin_threshold=5.5)
+    row = events.iloc[0]
+
+    assert np.isneginf(row["logZ_stationary"])
+    assert np.isposinf(row["delta_trajectory_minus_stationary"])
+    assert bool(row["trajectory_confident_claim"])
+    assert np.isposinf(row["delta_imm_minus_fragmented"])
+    assert bool(row["imm_raw_win"])
+    assert bool(row["imm_confident_win_at_threshold"])
+    assert np.isposinf(row["delta_momentum_minus_diffusion"])
+    assert bool(row["momentum_raw_win_vs_diffusion"])
+    assert bool(row["momentum_confident_win_vs_diffusion"])
+
+    imm_audit = build_imm_vs_fragmented_audit(events, margin_threshold=5.5)
+    assert imm_audit.iloc[0]["within_family_classification"] == "clean_imm_candidate"
+
+
+def test_hc11_report_leaves_all_impossible_models_unresolved() -> None:
+    evidence = normalize_event_model_evidence(
+        pd.DataFrame(
+            _event(
+                "Achilles/day1",
+                0,
+                stationary=-np.inf,
+                diffusion=-np.inf,
+                fragmented=-np.inf,
+                first_order=-np.inf,
+                momentum=-np.inf,
+            )
+        )
+    )
+
+    row = build_event_table(evidence, margin_threshold=5.5).iloc[0]
+
+    assert row["best_model"] == ""
+    assert np.isneginf(row["best_log_evidence"])
+    assert row["best_trajectory_model"] == ""
+    assert np.isneginf(row["best_trajectory_log_evidence"])
+    assert np.isnan(row["delta_trajectory_minus_stationary"])
+    assert np.isnan(row["delta_imm_minus_fragmented"])
+    assert np.isnan(row["delta_momentum_minus_diffusion"])
+    assert not bool(row["trajectory_confident_claim"])
+    assert not bool(row["stationary_confident_claim"])
+
+
+def test_hc11_normalization_rejects_positive_infinite_and_nan_evidence() -> None:
+    frame = pd.DataFrame(
+        [
+            _score("Achilles/day1", 0, "stationary", -np.inf),
+            _score("Achilles/day1", 0, "diffusion", np.inf),
+            _score("Achilles/day1", 0, "fragmented", np.nan),
+        ]
+    )
+
+    normalized = normalize_event_model_evidence(frame)
+
+    assert normalized["model"].tolist() == ["stationary"]
+    assert np.isneginf(normalized.iloc[0]["log_evidence"])
 
 
 def test_hc11_reader_preserves_large_integer_like_event_ids(tmp_path: Path) -> None:

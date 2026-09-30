@@ -121,6 +121,7 @@ def test_build_event_summary_reports_exact_sparse_margins():
     summary = build_event_summary(frame)
 
     assert summary.loc[0, "best_model"] == EXACT_SPARSE_MOMENTUM_MODEL
+    assert bool(summary.loc[0, "recovered_expected_model"]) is True
     assert bool(summary.loc[0, "exact_surrogate_recovered"]) is True
     assert summary.loc[0, "exact_sparse_minus_diffusion"] > 0.0
 
@@ -239,7 +240,6 @@ def test_build_event_summary_preserves_negative_infinite_required_evidence():
 
     assert np.isneginf(summary.loc[0, "exact_sparse_momentum_log_evidence"])
     assert summary.loc[0, "required_exact_model_failures"] == 0
-
 
 
 def test_build_event_summary_keeps_all_impossible_event_unresolved_despite_serialized_winner():

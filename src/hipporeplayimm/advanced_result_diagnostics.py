@@ -818,17 +818,39 @@ def wrong_map_family_margin_difference_in_differences(
         rows: list[dict[str, object]] = []
         for key, group in frame.groupby(list(group_cols), sort=False):
             key_tuple = key if isinstance(key, tuple) else (key,)
-            by_model = group.dropna(subset=[evidence_col]).drop_duplicates(model_col, keep="last").set_index(model_col)
+            prepared = group.dropna(subset=[evidence_col]).copy()
+            prepared[evidence_col] = pd.to_numeric(
+                prepared[evidence_col],
+                errors="coerce",
+            )
+            evidence_values = prepared[evidence_col].to_numpy(dtype=float)
+            prepared = prepared.loc[
+                ~(np.isnan(evidence_values) | np.isposinf(evidence_values))
+            ]
+            prepared = prepared.sort_values(
+                [evidence_col, model_col],
+                ascending=[False, True],
+                kind="stable",
+            ).drop_duplicates(model_col, keep="first")
+            by_model = prepared.set_index(model_col)
             if nontrajectory_model not in by_model.index:
                 continue
-            available = [model for model in exact_trajectory_models if model in by_model.index]
+            available = [
+                model for model in exact_trajectory_models if model in by_model.index
+            ]
             if not available:
                 continue
-            best_trajectory_model = str(by_model.loc[available, evidence_col].astype(float).idxmax())
-            margin = float(by_model.loc[best_trajectory_model, evidence_col]) - float(
-                by_model.loc[nontrajectory_model, evidence_col]
-            )
-            row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+            candidate_values = by_model.loc[available, evidence_col].astype(float)
+            if not np.isfinite(candidate_values.to_numpy(dtype=float)).any():
+                continue
+            best_trajectory_model = str(candidate_values.idxmax())
+            margin = float(
+                by_model.loc[best_trajectory_model, evidence_col]
+            ) - float(by_model.loc[nontrajectory_model, evidence_col])
+            row = {
+                column: value
+                for column, value in zip(group_cols, key_tuple, strict=True)
+            }
             row[f"{prefix}_best_trajectory_model"] = best_trajectory_model
             row[f"{prefix}_trajectory_minus_nontrajectory_log_evidence"] = margin
             rows.append(row)

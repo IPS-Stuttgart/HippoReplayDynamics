@@ -1482,7 +1482,10 @@ def model_disagreement_events(
             best = flagged_best
             if not best and "log_evidence" in group:
                 evidence = pd.to_numeric(group["log_evidence"], errors="coerce")
-                usable = ~(evidence.isna() | np.isposinf(evidence.to_numpy(dtype=float)))
+                positive_infinite = np.isposinf(
+                    evidence.to_numpy(dtype=float)
+                )
+                usable = ~(evidence.isna() | positive_infinite)
                 candidates = group.loc[usable].copy()
                 if not candidates.empty:
                     candidate_values = pd.to_numeric(
@@ -1528,6 +1531,7 @@ def model_disagreement_events(
             "evidence_margin_category"
         ].isin(["tie", "weak"])
     return out
+
 
 def adversarial_synthetic_case_specs() -> pd.DataFrame:
     """Return a catalog of adversarial synthetic cases worth adding to recovery tests."""

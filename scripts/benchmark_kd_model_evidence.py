@@ -441,27 +441,51 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
     for _, g in df.groupby(["session", "event_index"], sort=False):
         g = g.copy()
         vals = g["log_evidence"].to_numpy(float)
-        maxv = float(np.max(vals))
-        probs = np.exp(vals - logsumexp(vals))
-        best = str(g.iloc[int(np.argmax(vals))]["model"])
-        g["relative_log_evidence"] = vals - maxv
-        g["model_probability"] = probs
-        g["is_best_model"] = g["model"] == best
-        g["best_model"] = best
+        invalid = np.isnan(vals) | np.isposinf(vals)
+        if np.any(invalid):
+            raise ValueError("KD log_evidence must be finite or -inf")
+
+        g["relative_log_evidence"] = np.nan
+        g["model_probability"] = np.nan
+        g["is_best_model"] = False
+        g["best_model"] = ""
+
+        # Negative-infinite log evidence is a valid statement that a model
+        # assigns zero probability to the event.  If every model is -inf,
+        # however, there is no evidence-defined winner: -inf - -inf and the
+        # normalized model probabilities are undefined.  Do not let row order
+        # fabricate a best model in that case.
+        if np.any(np.isfinite(vals)):
+            maxv = float(np.max(vals))
+            probs = np.exp(vals - logsumexp(vals))
+            best_index = int(np.argmax(vals))
+            best = str(g.iloc[best_index]["model"])
+            g["relative_log_evidence"] = vals - maxv
+            g["model_probability"] = probs
+            g.iloc[best_index, g.columns.get_loc("is_best_model")] = True
+            g["best_model"] = best
+
         for family, col in (("trajectory", "best_trajectory_model"), ("nontrajectory", "best_nontrajectory_model")):
             subset = g[g["model_family"] == family]
+            g[col] = ""
+            g[f"delta_vs_{family}_best"] = np.nan
             if subset.empty:
-                g[col] = ""
-                g[f"delta_vs_{family}_best"] = np.nan
-            else:
-                bidx = int(np.argmax(subset["log_evidence"].to_numpy(float)))
-                bname = str(subset.iloc[bidx]["model"])
-                blog = float(subset.iloc[bidx]["log_evidence"])
-                g[col] = bname
-                g[f"delta_vs_{family}_best"] = g["log_evidence"] - blog
+                continue
+
+            family_values = subset["log_evidence"].to_numpy(float)
+            # A family containing only impossible (-inf) models has no best
+            # member.  Leaving the family winner/deltas unresolved prevents
+            # downstream analyses from reporting an order-dependent model name.
+            if not np.any(np.isfinite(family_values)):
+                continue
+
+            bidx = int(np.argmax(family_values))
+            bname = str(subset.iloc[bidx]["model"])
+            blog = float(subset.iloc[bidx]["log_evidence"])
+            g[col] = bname
+            g[f"delta_vs_{family}_best"] = g["log_evidence"] - blog
         groups.append(g)
     return pd.concat(groups, ignore_index=True).sort_values(["event_index", "model"]).reset_index(drop=True)
-
 
 def _summary(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby(["model", "model_family"], as_index=False).agg(
@@ -481,9 +505,15 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
     base = df.drop_duplicates(["session", "event_index"])
     rows = []
     for col in ("best_model", "best_trajectory_model", "best_nontrajectory_model"):
-        vc = base[col].value_counts().rename_axis("model").reset_index(name="events")
+        values = base[col].dropna().astype(str)
+        values = values[values != ""]
+        if values.empty:
+            continue
+        vc = values.value_counts().rename_axis("model").reset_index(name="events")
         vc["comparison"] = col
         rows.extend(vc.to_dict("records"))
+    if not rows:
+        return pd.DataFrame(columns=["comparison", "model", "events"])
     return pd.DataFrame(rows)[["comparison", "model", "events"]]
 
 

@@ -701,19 +701,26 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         exact = s[_coerce_bool_series(s["evidence_comparable"])]
         if not exact.empty:
             vals = exact["log_evidence"].to_numpy(float)
-            maxv = float(np.max(vals))
-            probs = np.exp(vals - logsumexp(vals))
-            best_index = exact.index[int(np.argmax(vals))]
-            best = str(g.loc[best_index, "model"])
-            g.loc[exact.index, "relative_log_evidence"] = vals - maxv
-            g.loc[exact.index, "model_probability"] = probs
-            g.loc[best_index, "is_best_model"] = True
-            g["best_model"] = best
+            # -inf is valid exact zero evidence, but an all-impossible set has
+            # no evidence-defined winner.  Avoid letting np.argmax choose one
+            # model solely because it appears first in the table.
+            if np.any(np.isfinite(vals)):
+                maxv = float(np.max(vals))
+                probs = np.exp(vals - logsumexp(vals))
+                best_index = exact.index[int(np.argmax(vals))]
+                best = str(g.loc[best_index, "model"])
+                g.loc[exact.index, "relative_log_evidence"] = vals - maxv
+                g.loc[exact.index, "model_probability"] = probs
+                g.loc[best_index, "is_best_model"] = True
+                g["best_model"] = best
 
         for family, col in (("trajectory", "best_trajectory_model"), ("nontrajectory", "best_nontrajectory_model")):
             subset = exact[exact["model_family"] == family]
             if not subset.empty:
-                bidx = int(np.argmax(subset["log_evidence"].to_numpy(float)))
+                family_values = subset["log_evidence"].to_numpy(float)
+                if not np.any(np.isfinite(family_values)):
+                    continue
+                bidx = int(np.argmax(family_values))
                 bname = str(subset.iloc[bidx]["model"])
                 blog = float(subset.iloc[bidx]["log_evidence"])
                 g[col] = bname
@@ -722,12 +729,15 @@ def _add_evidence_columns(df: pd.DataFrame) -> pd.DataFrame:
         truncated = s[s["evidence_support"].eq(TRUNCATED_EVIDENCE_SUPPORT)]
         if not truncated.empty:
             lower_bounds = truncated["log_evidence"].to_numpy(float)
-            max_lower_bound = float(np.max(lower_bounds))
-            best_truncated_index = truncated.index[int(np.argmax(lower_bounds))]
-            best_truncated = str(g.loc[best_truncated_index, "model"])
-            g.loc[truncated.index, "truncated_relative_log_evidence"] = lower_bounds - max_lower_bound
-            g.loc[best_truncated_index, "is_best_truncated_lower_bound"] = True
-            g["best_truncated_lower_bound_model"] = best_truncated
+            # Lower bounds can also all be impossible.  In that case there is
+            # no meaningful best truncated model or relative lower bound.
+            if np.any(np.isfinite(lower_bounds)):
+                max_lower_bound = float(np.max(lower_bounds))
+                best_truncated_index = truncated.index[int(np.argmax(lower_bounds))]
+                best_truncated = str(g.loc[best_truncated_index, "model"])
+                g.loc[truncated.index, "truncated_relative_log_evidence"] = lower_bounds - max_lower_bound
+                g.loc[best_truncated_index, "is_best_truncated_lower_bound"] = True
+                g["best_truncated_lower_bound_model"] = best_truncated
         groups.append(g)
     out = pd.concat(groups, ignore_index=True)
     sort_columns = [column for column in (*group_columns, "model") if column in out.columns]

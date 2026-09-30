@@ -241,6 +241,28 @@ def test_build_event_summary_preserves_negative_infinite_required_evidence():
     assert summary.loc[0, "required_exact_model_failures"] == 0
 
 
+def test_build_event_summary_keeps_all_impossible_event_unresolved():
+    event = _fake_event(
+        "Rat1/Open1",
+        0,
+        "momentum",
+        EXACT_SPARSE_MOMENTUM_MODEL,
+    )
+    for row in event:
+        row["log_evidence"] = float("-inf")
+        # These serialized fields deliberately mimic an older artifact that
+        # fabricated a winner from row order.
+        row["best_model"] = EXACT_SPARSE_MOMENTUM_MODEL
+        row["recovered_expected_model"] = True
+        row["exact_surrogate_recovered_expected_model"] = True
+
+    summary = build_event_summary(pd.DataFrame(event))
+
+    assert summary.loc[0, "best_model"] == ""
+    assert bool(summary.loc[0, "recovered_expected_model"]) is False
+    assert bool(summary.loc[0, "exact_surrogate_recovered"]) is False
+
+
 def _write_fake_scores(tmp_path, session_dir: str, events: list[list[dict[str, object]]]) -> None:
     output = tmp_path / session_dir
     output.mkdir(parents=True)

@@ -494,16 +494,20 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
     best_exact_trajectory = _best_row(exact_trajectory)
     best_exact_nontrajectory = _best_row(exact_nontrajectory)
     best_lower_bound_trajectory = _best_row(lower_bound_trajectory)
+    resolved_strict_best = _resolved_best_row(exact)
+    resolved_exact_trajectory = _resolved_best_row(exact_trajectory)
+    resolved_exact_nontrajectory = _resolved_best_row(exact_nontrajectory)
+    resolved_lower_bound_trajectory = _resolved_best_row(lower_bound_trajectory)
 
     out: dict[str, object] = {
-        "strict_best_model": _row_value(strict_best, "model"),
-        "strict_best_canonical_model": _row_value(strict_best, "canonical_model"),
-        "strict_best_model_family": _row_value(strict_best, "canonical_model_family"),
-        "best_exact_trajectory_model": _row_value(best_exact_trajectory, "model"),
+        "strict_best_model": _row_value(resolved_strict_best, "model"),
+        "strict_best_canonical_model": _row_value(resolved_strict_best, "canonical_model"),
+        "strict_best_model_family": _row_value(resolved_strict_best, "canonical_model_family"),
+        "best_exact_trajectory_model": _row_value(resolved_exact_trajectory, "model"),
         "best_exact_trajectory_log_evidence": _row_float(best_exact_trajectory, "log_evidence"),
-        "best_exact_nontrajectory_model": _row_value(best_exact_nontrajectory, "model"),
+        "best_exact_nontrajectory_model": _row_value(resolved_exact_nontrajectory, "model"),
         "best_exact_nontrajectory_log_evidence": _row_float(best_exact_nontrajectory, "log_evidence"),
-        "best_lower_bound_trajectory_model": _row_value(best_lower_bound_trajectory, "model"),
+        "best_lower_bound_trajectory_model": _row_value(resolved_lower_bound_trajectory, "model"),
         "best_lower_bound_trajectory_log_evidence": _row_float(best_lower_bound_trajectory, "log_evidence"),
         "trajectory_strict_win": np.nan,
         "trajectory_certified_win": np.nan,
@@ -511,9 +515,13 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
     }
 
     if best_exact_trajectory is not None and best_exact_nontrajectory is not None:
-        strict_delta = _row_float(best_exact_trajectory, "log_evidence") - _row_float(best_exact_nontrajectory, "log_evidence")
+        strict_delta = _evidence_delta(
+            _row_float(best_exact_trajectory, "log_evidence"),
+            _row_float(best_exact_nontrajectory, "log_evidence"),
+        )
         out["trajectory_minus_nontrajectory_exact_log_evidence"] = strict_delta
-        out["trajectory_strict_win"] = bool(strict_delta > 0.0)
+        if not np.isnan(strict_delta):
+            out["trajectory_strict_win"] = bool(strict_delta > 0.0)
     else:
         out["trajectory_minus_nontrajectory_exact_log_evidence"] = np.nan
 
@@ -521,20 +529,35 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
         return out
 
     nontrajectory_log = _row_float(best_exact_nontrajectory, "log_evidence")
-    exact_certified = (
-        best_exact_trajectory is not None
-        and _row_float(best_exact_trajectory, "log_evidence") > nontrajectory_log
+    exact_delta = (
+        _evidence_delta(
+            _row_float(best_exact_trajectory, "log_evidence"),
+            nontrajectory_log,
+        )
+        if best_exact_trajectory is not None
+        else np.nan
     )
-    lower_bound_certified = (
-        best_lower_bound_trajectory is not None
-        and _row_float(best_lower_bound_trajectory, "log_evidence") > nontrajectory_log
+    lower_bound_delta = (
+        _evidence_delta(
+            _row_float(best_lower_bound_trajectory, "log_evidence"),
+            nontrajectory_log,
+        )
+        if best_lower_bound_trajectory is not None
+        else np.nan
     )
-    if exact_certified:
+    if not np.isnan(exact_delta) and exact_delta > 0.0:
         out["trajectory_certified_win"] = True
         out["trajectory_certification_reason"] = "exact_trajectory_beats_exact_nontrajectory"
-    elif lower_bound_certified:
+    elif not np.isnan(lower_bound_delta) and lower_bound_delta > 0.0:
         out["trajectory_certified_win"] = True
         out["trajectory_certification_reason"] = "trajectory_lower_bound_beats_exact_nontrajectory"
+    elif (
+        (best_exact_trajectory is not None or best_lower_bound_trajectory is not None)
+        and np.isnan(exact_delta)
+        and np.isnan(lower_bound_delta)
+    ):
+        out["trajectory_certified_win"] = np.nan
+        out["trajectory_certification_reason"] = "all_compared_evidence_impossible"
     else:
         out["trajectory_certified_win"] = False
         out["trajectory_certification_reason"] = "no_trajectory_evidence_above_exact_nontrajectory"
@@ -542,24 +565,32 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
 
 
 def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
-    candidate_momentum = _best_row(group[group["canonical_model"].eq("momentum")])
-    exact_displacement_momentum = _best_row(group[group["canonical_model"].eq("displacement-momentum")])
-    momentum = _best_row(group[group["canonical_model"].isin(["momentum", "displacement-momentum"])])
-    diffusion = _best_row(group[group["canonical_model"].eq("diffusion")])
+    candidate_momentum_rows = group[group["canonical_model"].eq("momentum")]
+    exact_displacement_momentum_rows = group[group["canonical_model"].eq("displacement-momentum")]
+    momentum_rows = group[group["canonical_model"].isin(["momentum", "displacement-momentum"])]
+    diffusion_rows = group[group["canonical_model"].eq("diffusion")]
+    candidate_momentum = _best_row(candidate_momentum_rows)
+    exact_displacement_momentum = _best_row(exact_displacement_momentum_rows)
+    momentum = _best_row(momentum_rows)
+    diffusion = _best_row(diffusion_rows)
+    resolved_candidate_momentum = _resolved_best_row(candidate_momentum_rows)
+    resolved_exact_displacement_momentum = _resolved_best_row(exact_displacement_momentum_rows)
+    resolved_momentum = _resolved_best_row(momentum_rows)
+    resolved_diffusion = _resolved_best_row(diffusion_rows)
     out: dict[str, object] = {
-        "momentum_model": _row_value(momentum, "model"),
+        "momentum_model": _row_value(resolved_momentum, "model"),
         "momentum_family_canonical_model": _row_value(momentum, "canonical_model"),
         "momentum_log_evidence": _row_float(momentum, "log_evidence"),
         "momentum_evidence_support": _row_value(momentum, "evidence_support"),
         "momentum_evidence_comparable": _row_bool(momentum, "evidence_comparable"),
-        "candidate_momentum_model": _row_value(candidate_momentum, "model"),
+        "candidate_momentum_model": _row_value(resolved_candidate_momentum, "model"),
         "candidate_momentum_log_evidence": _row_float(candidate_momentum, "log_evidence"),
         "candidate_momentum_evidence_support": _row_value(candidate_momentum, "evidence_support"),
-        "exact_displacement_momentum_model": _row_value(exact_displacement_momentum, "model"),
+        "exact_displacement_momentum_model": _row_value(resolved_exact_displacement_momentum, "model"),
         "exact_displacement_momentum_log_evidence": _row_float(exact_displacement_momentum, "log_evidence"),
         "exact_displacement_momentum_evidence_support": _row_value(exact_displacement_momentum, "evidence_support"),
         "exact_displacement_momentum_evidence_comparable": _row_bool(exact_displacement_momentum, "evidence_comparable"),
-        "diffusion_model": _row_value(diffusion, "model"),
+        "diffusion_model": _row_value(resolved_diffusion, "model"),
         "diffusion_log_evidence": _row_float(diffusion, "log_evidence"),
         "diffusion_evidence_support": _row_value(diffusion, "evidence_support"),
         "diffusion_evidence_comparable": _row_bool(diffusion, "evidence_comparable"),
@@ -574,18 +605,30 @@ def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
     if momentum is None or diffusion is None:
         return out
 
-    delta = _row_float(momentum, "log_evidence") - _row_float(diffusion, "log_evidence")
+    delta = _evidence_delta(
+        _row_float(momentum, "log_evidence"),
+        _row_float(diffusion, "log_evidence"),
+    )
     momentum_support = str(momentum.get("evidence_support", ""))
     diffusion_comparable = _row_bool(diffusion, "evidence_comparable")
     momentum_comparable = _row_bool(momentum, "evidence_comparable")
     momentum_is_lower_bound = momentum_support == TRUNCATED_EVIDENCE_SUPPORT
     out["momentum_minus_diffusion_log_evidence"] = float(delta)
+    if np.isnan(delta):
+        out["momentum_vs_diffusion_certification"] = "all_compared_evidence_impossible"
+        return out
     out["momentum_beats_diffusion_reported"] = bool(delta > 0.0)
     if exact_displacement_momentum is not None:
-        exact_delta = _row_float(exact_displacement_momentum, "log_evidence") - _row_float(diffusion, "log_evidence")
+        exact_delta = _evidence_delta(
+            _row_float(exact_displacement_momentum, "log_evidence"),
+            _row_float(diffusion, "log_evidence"),
+        )
         exact_comparable = _row_bool(exact_displacement_momentum, "evidence_comparable") and diffusion_comparable
         out["exact_displacement_momentum_minus_diffusion_log_evidence"] = float(exact_delta)
-        out["exact_displacement_momentum_beats_diffusion"] = bool(exact_comparable and exact_delta > 0.0)
+        if not np.isnan(exact_delta):
+            out["exact_displacement_momentum_beats_diffusion"] = bool(
+                exact_comparable and exact_delta > 0.0
+            )
 
     if momentum_comparable and diffusion_comparable:
         out["momentum_beats_diffusion_certified"] = bool(delta > 0.0)
@@ -609,6 +652,28 @@ def _best_row(frame: pd.DataFrame) -> pd.Series | None:
         return None
     values = frame["log_evidence"].to_numpy(float)
     return frame.iloc[int(np.nanargmax(values))]
+
+
+def _resolved_best_row(frame: pd.DataFrame) -> pd.Series | None:
+    """Return a best row only when finite evidence defines a winner."""
+
+    if frame.empty:
+        return None
+    values = frame["log_evidence"].to_numpy(float)
+    finite_positions = np.flatnonzero(np.isfinite(values))
+    if finite_positions.size == 0:
+        return None
+    best_position = int(finite_positions[np.argmax(values[finite_positions])])
+    return frame.iloc[best_position]
+
+
+def _evidence_delta(left: float, right: float) -> float:
+    """Subtract log evidences without turning two impossible values into a decision."""
+
+    if np.isneginf(left) and np.isneginf(right):
+        return float("nan")
+    with np.errstate(invalid="ignore"):
+        return float(left - right)
 
 
 def _row_value(row: pd.Series | None, column: str) -> object:

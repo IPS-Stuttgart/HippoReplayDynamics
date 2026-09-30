@@ -258,6 +258,32 @@ def test_random_effects_uses_only_events_with_paired_model_support():
     )
 
 
+def test_random_effects_splits_exact_session_ties_without_model_order_bias():
+    frame = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": model,
+                "status": "success",
+                "log_evidence": 0.0,
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+                "is_best_model": False,
+            }
+            for model in ("z-model", "a-model")
+        ]
+    )
+
+    summary = random_effects_model_probabilities(frame).set_index("model")
+
+    assert summary.loc["a-model", "session_win_count"] == pytest.approx(0.5)
+    assert summary.loc["z-model", "session_win_count"] == pytest.approx(0.5)
+    assert summary.loc["a-model", "random_effects_probability"] == pytest.approx(0.5)
+    assert summary.loc["z-model", "random_effects_probability"] == pytest.approx(0.5)
+    assert summary["random_effects_probability"].sum() == pytest.approx(1.0)
+
+
 def test_all_session_boolean_string_false_rows_are_not_exact_comparable():
     frame = pd.DataFrame(
         [

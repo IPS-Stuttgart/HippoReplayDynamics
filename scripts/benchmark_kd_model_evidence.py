@@ -505,9 +505,15 @@ def _counts(df: pd.DataFrame) -> pd.DataFrame:
     base = df.drop_duplicates(["session", "event_index"])
     rows = []
     for col in ("best_model", "best_trajectory_model", "best_nontrajectory_model"):
-        vc = base[col].value_counts().rename_axis("model").reset_index(name="events")
+        values = base[col].dropna().astype(str)
+        values = values[values != ""]
+        if values.empty:
+            continue
+        vc = values.value_counts().rename_axis("model").reset_index(name="events")
         vc["comparison"] = col
         rows.extend(vc.to_dict("records"))
+    if not rows:
+        return pd.DataFrame(columns=["comparison", "model", "events"])
     return pd.DataFrame(rows)[["comparison", "model", "events"]]
 
 

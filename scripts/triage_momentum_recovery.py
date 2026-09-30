@@ -219,6 +219,9 @@ def summarize_triage_events(event_table: pd.DataFrame) -> pd.DataFrame:
                 "exact_nonrecovery_events": int(
                     group["triage_category"].eq("exact_nonrecovery").sum()
                 ),
+                "unresolved_all_impossible_events": int(
+                    group["triage_category"].eq("unresolved_all_impossible").sum()
+                ),
                 "mean_expected_minus_best_comparable_log_evidence": _mean(
                     group["expected_minus_best_comparable_log_evidence"]
                 ),
@@ -273,9 +276,14 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
     best_comparable_model = ""
     best_comparable_log_evidence = float("nan")
     if not comparable.empty:
-        best_comparable = _best_log_evidence_row(comparable)
-        best_comparable_model = str(best_comparable["model"])
-        best_comparable_log_evidence = float(best_comparable["log_evidence"])
+        comparable_values = pd.to_numeric(
+            comparable["log_evidence"],
+            errors="coerce",
+        ).to_numpy(float)
+        best_comparable_log_evidence = float(np.max(comparable_values))
+        best_comparable = _resolved_best_log_evidence_row(comparable)
+        if best_comparable is not None:
+            best_comparable_model = str(best_comparable["model"])
 
     expected_rows = scored[scored["model"].astype(str).eq(expected_model)].copy()
     if expected_rows.empty:
@@ -292,7 +300,8 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
     expected_comparable = _as_bool(
         expected.get("evidence_comparable", expected_support == EXACT_SUPPORT)
     )
-    margin = expected_log_evidence - best_comparable_log_evidence
+    with np.errstate(invalid="ignore"):
+        margin = expected_log_evidence - best_comparable_log_evidence
     strict_exact_recovery = bool(expected_comparable and best_comparable_model == expected_model)
     lower_bound_certified_recovery = bool(
         (not expected_comparable)
@@ -308,7 +317,16 @@ def _triage_event_group(group: pd.DataFrame, *, expected_model: str) -> dict[str
         expected.get("oracle_candidate_support", first.get("oracle_candidate_support", False))
     )
 
-    if oracle_support and certified_or_strict:
+    all_comparable_impossible = bool(
+        expected_comparable
+        and not comparable.empty
+        and best_comparable_model == ""
+        and np.isneginf(best_comparable_log_evidence)
+    )
+
+    if all_comparable_impossible:
+        category = "unresolved_all_impossible"
+    elif oracle_support and certified_or_strict:
         category = "oracle_support_recovers"
     elif oracle_support and not certified_or_strict:
         category = "oracle_support_does_not_recover"
@@ -520,6 +538,19 @@ def _best_log_evidence_row(frame: pd.DataFrame) -> pd.Series:
     return frame.iloc[int(np.nanargmax(values))]
 
 
+def _resolved_best_log_evidence_row(frame: pd.DataFrame) -> pd.Series | None:
+    """Return a best row only when at least one model has nonzero evidence."""
+
+    if frame.empty:
+        return None
+    values = pd.to_numeric(frame["log_evidence"], errors="coerce").to_numpy(float)
+    finite_positions = np.flatnonzero(np.isfinite(values))
+    if finite_positions.size == 0:
+        return None
+    best_position = int(finite_positions[np.argmax(values[finite_positions])])
+    return frame.iloc[best_position]
+
+
 def _support_diagnostics(row: pd.Series) -> dict[str, object]:
     values: dict[str, object] = {}
     for column in SUPPORT_DIAGNOSTIC_COLUMNS:
@@ -559,11 +590,12 @@ def _failure_examples(event_table: pd.DataFrame, *, max_examples: int) -> pd.Dat
     priority = {
         "candidate_support_loss": 0,
         "oracle_support_does_not_recover": 1,
-        "exact_nonrecovery": 2,
-        "nondecisive_lower_bound": 3,
-        "no_comparable_exact_reference": 4,
-        "expected_model_not_scored": 5,
-        "no_successful_scores": 6,
+        "unresolved_all_impossible": 2,
+        "exact_nonrecovery": 3,
+        "nondecisive_lower_bound": 4,
+        "no_comparable_exact_reference": 5,
+        "expected_model_not_scored": 6,
+        "no_successful_scores": 7,
     }
     failures["_priority"] = failures["triage_category"].map(priority).fillna(99).astype(int)
     failures["_missing"] = pd.to_numeric(

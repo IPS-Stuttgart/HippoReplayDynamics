@@ -1,0 +1,58 @@
+---
+name: Refresh model-evidence all-sessions artifact
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 1 */2 *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/refresh-model-evidence-all-sessions.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: refresh-model-evidence-all-sessions-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch-refresh:
+    name: Dispatch all-session evidence refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check for an active producer run
+        id: active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count="$(
+            gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow model-evidence-all-sessions.yml \
+              --limit 50 \
+              --json status \
+              --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")] | length'
+          )"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch producer
+        if: steps.active.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run model-evidence-all-sessions.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${{ github.event.repository.default_branch }}"
+
+      - name: Report existing producer
+        if: steps.active.outputs.count != '0'
+        run: |
+          echo "A model-evidence-all-sessions run is already active; no duplicate refresh was dispatched."

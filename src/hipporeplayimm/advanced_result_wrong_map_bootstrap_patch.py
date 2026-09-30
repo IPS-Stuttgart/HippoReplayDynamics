@@ -154,15 +154,15 @@ def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
                     "observed_events": int(observed["events"]),
                     "observed_rats": int(len(statistic_rats)),
                     "observed_positive_delta_fraction": float(observed["positive_delta_fraction"]),
-                    "positive_delta_fraction_ci95_low": diagnostics._quantile(positive_fractions, 0.025),
-                    "positive_delta_fraction_ci95_high": diagnostics._quantile(positive_fractions, 0.975),
+                    "positive_delta_fraction_ci95_low": _quantile_preserving_infinity(diagnostics, positive_fractions, 0.025),
+                    "positive_delta_fraction_ci95_high": _quantile_preserving_infinity(diagnostics, positive_fractions, 0.975),
                     "observed_mean_delta_map_log_evidence": float(observed["mean_delta_map_log_evidence"]),
-                    "mean_delta_ci95_low": diagnostics._quantile(means, 0.025),
-                    "mean_delta_ci95_high": diagnostics._quantile(means, 0.975),
+                    "mean_delta_ci95_low": _quantile_preserving_infinity(diagnostics, means, 0.025),
+                    "mean_delta_ci95_high": _quantile_preserving_infinity(diagnostics, means, 0.975),
                     "probability_mean_delta_gt_0": float(np.mean(np.asarray(means) > 0.0)),
                     "observed_median_delta_map_log_evidence": float(observed["median_delta_map_log_evidence"]),
-                    "median_delta_ci95_low": diagnostics._quantile(medians, 0.025),
-                    "median_delta_ci95_high": diagnostics._quantile(medians, 0.975),
+                    "median_delta_ci95_low": _quantile_preserving_infinity(diagnostics, medians, 0.025),
+                    "median_delta_ci95_high": _quantile_preserving_infinity(diagnostics, medians, 0.975),
                     "probability_median_delta_gt_0": float(np.mean(np.asarray(medians) > 0.0)),
                     "most_common_selected_model": str(observed["most_common_selected_model"]),
                 }
@@ -191,6 +191,21 @@ def _coerce_numeric_delta_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     )
     values = out["delta_map_log_evidence"].to_numpy(dtype=float)
     return out.loc[~np.isnan(values)].copy()
+
+
+def _quantile_preserving_infinity(
+    diagnostics,
+    values: Sequence[float],
+    q: float,
+) -> float:
+    """Use ordinary quantiles unless extended-real values require no interpolation."""
+
+    if not values:
+        return float("nan")
+    array = np.asarray(values, dtype=float)
+    if np.any(np.isinf(array)):
+        return float(np.quantile(array, q, method="inverted_cdf"))
+    return diagnostics._quantile(values, q)
 
 
 def _apply_numeric_evidence_wrappers(diagnostics) -> None:

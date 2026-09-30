@@ -494,25 +494,28 @@ def _trajectory_effects(group: pd.DataFrame) -> dict[str, object]:
     best_exact_trajectory = _best_row(exact_trajectory)
     best_exact_nontrajectory = _best_row(exact_nontrajectory)
     best_lower_bound_trajectory = _best_row(lower_bound_trajectory)
-    resolved_strict_best = _resolved_best_row(exact)
-    resolved_exact_trajectory = _resolved_best_row(exact_trajectory)
-    resolved_exact_nontrajectory = _resolved_best_row(exact_nontrajectory)
-    resolved_lower_bound_trajectory = _resolved_best_row(lower_bound_trajectory)
-
     out: dict[str, object] = {
-        "strict_best_model": _row_value(resolved_strict_best, "model"),
-        "strict_best_canonical_model": _row_value(resolved_strict_best, "canonical_model"),
-        "strict_best_model_family": _row_value(resolved_strict_best, "canonical_model_family"),
-        "best_exact_trajectory_model": _row_value(resolved_exact_trajectory, "model"),
+        "strict_best_model": _row_value(strict_best, "model"),
+        "strict_best_canonical_model": _row_value(strict_best, "canonical_model"),
+        "strict_best_model_family": _row_value(strict_best, "canonical_model_family"),
+        "best_exact_trajectory_model": _row_value(best_exact_trajectory, "model"),
         "best_exact_trajectory_log_evidence": _row_float(best_exact_trajectory, "log_evidence"),
-        "best_exact_nontrajectory_model": _row_value(resolved_exact_nontrajectory, "model"),
+        "best_exact_nontrajectory_model": _row_value(best_exact_nontrajectory, "model"),
         "best_exact_nontrajectory_log_evidence": _row_float(best_exact_nontrajectory, "log_evidence"),
-        "best_lower_bound_trajectory_model": _row_value(resolved_lower_bound_trajectory, "model"),
+        "best_lower_bound_trajectory_model": _row_value(best_lower_bound_trajectory, "model"),
         "best_lower_bound_trajectory_log_evidence": _row_float(best_lower_bound_trajectory, "log_evidence"),
         "trajectory_strict_win": np.nan,
         "trajectory_certified_win": np.nan,
         "trajectory_certification_reason": "no_exact_nontrajectory_reference",
     }
+
+    exact_values = exact["log_evidence"].to_numpy(dtype=float)
+    if exact_values.size and not np.any(np.isfinite(exact_values)):
+        out["strict_best_model"] = ""
+        out["strict_best_canonical_model"] = ""
+        out["strict_best_model_family"] = ""
+        out["best_exact_trajectory_model"] = ""
+        out["best_exact_nontrajectory_model"] = ""
 
     if best_exact_trajectory is not None and best_exact_nontrajectory is not None:
         strict_delta = _evidence_delta(
@@ -573,24 +576,20 @@ def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
     exact_displacement_momentum = _best_row(exact_displacement_momentum_rows)
     momentum = _best_row(momentum_rows)
     diffusion = _best_row(diffusion_rows)
-    resolved_candidate_momentum = _resolved_best_row(candidate_momentum_rows)
-    resolved_exact_displacement_momentum = _resolved_best_row(exact_displacement_momentum_rows)
-    resolved_momentum = _resolved_best_row(momentum_rows)
-    resolved_diffusion = _resolved_best_row(diffusion_rows)
     out: dict[str, object] = {
-        "momentum_model": _row_value(resolved_momentum, "model"),
+        "momentum_model": _row_value(momentum, "model"),
         "momentum_family_canonical_model": _row_value(momentum, "canonical_model"),
         "momentum_log_evidence": _row_float(momentum, "log_evidence"),
         "momentum_evidence_support": _row_value(momentum, "evidence_support"),
         "momentum_evidence_comparable": _row_bool(momentum, "evidence_comparable"),
-        "candidate_momentum_model": _row_value(resolved_candidate_momentum, "model"),
+        "candidate_momentum_model": _row_value(candidate_momentum, "model"),
         "candidate_momentum_log_evidence": _row_float(candidate_momentum, "log_evidence"),
         "candidate_momentum_evidence_support": _row_value(candidate_momentum, "evidence_support"),
-        "exact_displacement_momentum_model": _row_value(resolved_exact_displacement_momentum, "model"),
+        "exact_displacement_momentum_model": _row_value(exact_displacement_momentum, "model"),
         "exact_displacement_momentum_log_evidence": _row_float(exact_displacement_momentum, "log_evidence"),
         "exact_displacement_momentum_evidence_support": _row_value(exact_displacement_momentum, "evidence_support"),
         "exact_displacement_momentum_evidence_comparable": _row_bool(exact_displacement_momentum, "evidence_comparable"),
-        "diffusion_model": _row_value(resolved_diffusion, "model"),
+        "diffusion_model": _row_value(diffusion, "model"),
         "diffusion_log_evidence": _row_float(diffusion, "log_evidence"),
         "diffusion_evidence_support": _row_value(diffusion, "evidence_support"),
         "diffusion_evidence_comparable": _row_bool(diffusion, "evidence_comparable"),
@@ -615,6 +614,11 @@ def _momentum_diffusion_effects(group: pd.DataFrame) -> dict[str, object]:
     momentum_is_lower_bound = momentum_support == TRUNCATED_EVIDENCE_SUPPORT
     out["momentum_minus_diffusion_log_evidence"] = float(delta)
     if np.isnan(delta):
+        out["momentum_model"] = ""
+        out["momentum_family_canonical_model"] = ""
+        out["candidate_momentum_model"] = ""
+        out["exact_displacement_momentum_model"] = ""
+        out["diffusion_model"] = ""
         out["momentum_vs_diffusion_certification"] = "all_compared_evidence_impossible"
         return out
     out["momentum_beats_diffusion_reported"] = bool(delta > 0.0)
@@ -652,19 +656,6 @@ def _best_row(frame: pd.DataFrame) -> pd.Series | None:
         return None
     values = frame["log_evidence"].to_numpy(float)
     return frame.iloc[int(np.nanargmax(values))]
-
-
-def _resolved_best_row(frame: pd.DataFrame) -> pd.Series | None:
-    """Return a best row only when finite evidence defines a winner."""
-
-    if frame.empty:
-        return None
-    values = frame["log_evidence"].to_numpy(float)
-    finite_positions = np.flatnonzero(np.isfinite(values))
-    if finite_positions.size == 0:
-        return None
-    best_position = int(finite_positions[np.argmax(values[finite_positions])])
-    return frame.iloc[best_position]
 
 
 def _evidence_delta(left: float, right: float) -> float:

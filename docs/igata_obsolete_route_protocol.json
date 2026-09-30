@@ -1,0 +1,68 @@
+{
+  "protocol_id": "igata-obsolete-route-feasibility-v1",
+  "stage": "precontrast_feasibility",
+  "paper_doi": "10.1073/pnas.2011266118",
+  "release_doi": "10.17632/4xk5w69yr5.1",
+  "release_readme_sha256": "e8f87335591db16159abeb20f7923066a38e433c220b092ea14e43eaf484c42a",
+  "release_geometry_sha256": "df190afb13df9196d68795bac904626a8b84f2e4ae31831e5b2778df19065b5a",
+  "supplement_pdf_sha256": "0dc9f345e0a73e64eaa199d22877a66bbf3ee1969d11365d735feb9c45247f13",
+  "supplement_text_sha256": "1c9f0db94d52e06c931cbbd709876e4890161e99b26274bda240d7b05ebe16fc",
+  "expected_animals": {
+    "Disrupted": ["rat6", "rat7", "rat8", "rat9", "rat10", "rat11"],
+    "Delayed": ["rat12", "rat13", "rat14", "rat15", "rat16", "rat17"]
+  },
+  "geometry": {
+    "coordinate_unit": "mm",
+    "grid_side_mm": 200,
+    "field_side_mm": 1000,
+    "start": "U",
+    "goal": "E",
+    "old_checkpoint": "S",
+    "new_checkpoint": "G",
+    "paper_to_release_labels": "SI p6 lowercase u,e,s,g correspond to uppercase U,E,S,G in the release; lowercase release labels are external boxes/alleyway, not paper lattices."
+  },
+  "route_rules": {
+    "optimized_total_string_length_strictly_below": 12,
+    "segment_string_length_strictly_below": 8,
+    "obsolete_requires_old_checkpoint_and_early_goal_before_new_checkpoint": true,
+    "missing_or_contradictory_task_log": "unclassifiable",
+    "mixed_old_then_new_without_early_goal": "other",
+    "success_evidence": "documented checkpoint-arrival flag followed by goal-port sensor; not a direct milk-delivery measurement",
+    "max_tracking_gap_ms": 250,
+    "boundary_sensitivity_offsets_mm": [-20, -10, 0, 10, 20],
+    "tracking_gap_sensitivity_ms": [125, 250, 500]
+  },
+  "source_review": {
+    "main_article_reviewed": true,
+    "supplement_reviewed": true,
+    "release_readme_and_geometry_reviewed": true,
+    "existing_selective_obsolete_vs_other_test_found": false,
+    "novelty_status": "candidate_extension_not_global_novelty_proof",
+    "reviewed_analysis": "Main Fig5 and SI p12/S15 test modified-Levenshtein trajectory instability after first start-S-C2 use; no conditional obsolete-versus-other contrast found in these sources.",
+    "recording_block_order_documented": false,
+    "reward_relocation_trial_documented": false,
+    "online_ripple_trigger_timestamps_released": false,
+    "random_allocation_documented": false,
+    "undocumented_log_columns": [14, 15],
+    "do_not_use_obsolete_log_columns": [7, 11]
+  },
+  "primary_model": {
+    "outcomes": ["new", "obsolete", "other"],
+    "reference_outcome": "other",
+    "conditional_population": "next trial immediately following successful optimized-new-route trial",
+    "covariates": ["stimulation_group", "chronological_trial", "prior_successful_new_route_experience"],
+    "animal_level_variation": true,
+    "contrast": "immediate-minus-delayed log odds obsolete versus other",
+    "selective_claim_requires": ["increased obsolete probability", "increased obsolete-versus-other odds"],
+    "post_treatment_conditioning": true,
+    "separate_acquisition_and_unconditional_reports_required": true
+  },
+  "validation": {
+    "development_seed": 431001,
+    "validation_seed": 431002,
+    "replicates_per_generator": 1000,
+    "generators": ["no_effect", "generic_destabilization", "selective_old_route_relapse", "impaired_discovery_without_selective_relapse"],
+    "required_before_native_contrast": ["verified_actual_trial_structure", "frozen_cohort", "route_identifiability", "calibrated_false_positives", "interval_coverage", "power_curve", "leave_one_animal_out", "independent_calculation"]
+  },
+  "stop_policy": "Do not fit native group contrast or simulate an invented trial structure when complete chronology, task contingency, or manipulation alignment is unresolved. Do not reinterpret stop as evidence of absence."
+}

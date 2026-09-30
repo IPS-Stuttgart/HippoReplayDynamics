@@ -38,16 +38,22 @@ def _row(
     }
 
 
-def test_successful_negative_infinite_exact_evidence_is_not_dropped() -> None:
+def test_successful_negative_infinite_exact_evidence_is_preserved_but_unresolved() -> None:
     scores = pd.DataFrame(
         [_row(0, DEFAULT_EXPECTED_MOMENTUM_MODEL, float("-inf"))]
     )
 
-    event = build_momentum_recovery_triage(scores).event_table.iloc[0]
+    tables = build_momentum_recovery_triage(scores)
+    event = tables.event_table.iloc[0]
+    summary = tables.summary.iloc[0]
 
-    assert event["triage_category"] == "strict_exact_recovery"
-    assert bool(event["strict_exact_recovery"])
+    assert event["triage_category"] == "unresolved_all_impossible"
+    assert not bool(event["strict_exact_recovery"])
+    assert not bool(event["certified_or_strict_recovery"])
+    assert event["best_comparable_model"] == ""
+    assert event["best_comparable_log_evidence"] == float("-inf")
     assert event["expected_model_log_evidence"] == float("-inf")
+    assert int(summary["unresolved_all_impossible_events"]) == 1
 
 
 def test_finite_truncated_lower_bound_beats_negative_infinite_exact_reference() -> None:

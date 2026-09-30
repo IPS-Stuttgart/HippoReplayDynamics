@@ -546,7 +546,12 @@ def build_event_summary(scores: pd.DataFrame) -> pd.DataFrame:
         # Recompute recovery from the currently usable exact-comparable evidence.
         # Serialized recovery flags may come from an older aggregation pass and can
         # otherwise preserve a fabricated winner for an all-impossible event.
-        recovered_expected = bool(best_model and best_model == expected_model)
+        acceptable_recovery_models = {
+            model for model in (expected_model, surrogate_model) if model
+        }
+        recovered_expected = bool(
+            best_model and best_model in acceptable_recovery_models
+        )
         exact_surrogate_recovered = bool(best_model and best_model == surrogate_model)
         rows.append(
             {

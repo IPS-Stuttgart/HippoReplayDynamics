@@ -119,3 +119,57 @@ def test_kd_mixed_finite_and_impossible_family_keeps_finite_winner() -> None:
     assert float(by_model.loc["momentum", "model_probability"]) == 0.0
     assert float(by_model.loc["diffusion", "delta_vs_trajectory_best"]) == 0.0
     assert np.isneginf(float(by_model.loc["momentum", "delta_vs_trajectory_best"]))
+
+def test_kd_best_model_counts_exclude_unresolved_winners() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "model": "stationary",
+                "model_family": "nontrajectory",
+                "log_evidence": -np.inf,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 10,
+                "model": "diffusion",
+                "model_family": "trajectory",
+                "log_evidence": -np.inf,
+            },
+        ]
+    )
+
+    scored = kd_benchmark._add_evidence_columns(rows)
+    counts = kd_benchmark._counts(scored)
+
+    assert counts.empty
+    assert counts.columns.tolist() == ["comparison", "model", "events"]
+
+
+def test_kd_best_model_counts_skip_only_unresolved_family() -> None:
+    rows = pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 11,
+                "model": "random",
+                "model_family": "nontrajectory",
+                "log_evidence": 0.0,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 11,
+                "model": "diffusion",
+                "model_family": "trajectory",
+                "log_evidence": -np.inf,
+            },
+        ]
+    )
+
+    scored = kd_benchmark._add_evidence_columns(rows)
+    counts = kd_benchmark._counts(scored)
+
+    assert set(counts["comparison"]) == {"best_model", "best_nontrajectory_model"}
+    assert counts["model"].eq("random").all()
+

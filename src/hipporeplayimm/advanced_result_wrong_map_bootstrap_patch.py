@@ -154,15 +154,15 @@ def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
                     "observed_events": int(observed["events"]),
                     "observed_rats": int(len(statistic_rats)),
                     "observed_positive_delta_fraction": float(observed["positive_delta_fraction"]),
-                    "positive_delta_fraction_ci95_low": diagnostics._quantile(positive_fractions, 0.025),
-                    "positive_delta_fraction_ci95_high": diagnostics._quantile(positive_fractions, 0.975),
+                    "positive_delta_fraction_ci95_low": _quantile_preserving_infinity(diagnostics, positive_fractions, 0.025),
+                    "positive_delta_fraction_ci95_high": _quantile_preserving_infinity(diagnostics, positive_fractions, 0.975),
                     "observed_mean_delta_map_log_evidence": float(observed["mean_delta_map_log_evidence"]),
-                    "mean_delta_ci95_low": diagnostics._quantile(means, 0.025),
-                    "mean_delta_ci95_high": diagnostics._quantile(means, 0.975),
+                    "mean_delta_ci95_low": _quantile_preserving_infinity(diagnostics, means, 0.025),
+                    "mean_delta_ci95_high": _quantile_preserving_infinity(diagnostics, means, 0.975),
                     "probability_mean_delta_gt_0": float(np.mean(np.asarray(means) > 0.0)),
                     "observed_median_delta_map_log_evidence": float(observed["median_delta_map_log_evidence"]),
-                    "median_delta_ci95_low": diagnostics._quantile(medians, 0.025),
-                    "median_delta_ci95_high": diagnostics._quantile(medians, 0.975),
+                    "median_delta_ci95_low": _quantile_preserving_infinity(diagnostics, medians, 0.025),
+                    "median_delta_ci95_high": _quantile_preserving_infinity(diagnostics, medians, 0.975),
                     "probability_median_delta_gt_0": float(np.mean(np.asarray(medians) > 0.0)),
                     "most_common_selected_model": str(observed["most_common_selected_model"]),
                 }
@@ -180,14 +180,32 @@ def _apply_rat_bootstrap_wrapper(diagnostics) -> None:
 
 
 def _coerce_numeric_delta_evidence(frame: pd.DataFrame) -> pd.DataFrame:
-    """Return rows with finite numeric wrong-map evidence deltas."""
+    """Return rows with numeric wrong-map evidence deltas, including infinities."""
 
     out = frame.copy()
     if out.empty or "delta_map_log_evidence" not in out.columns:
         return out
-    out["delta_map_log_evidence"] = pd.to_numeric(out["delta_map_log_evidence"], errors="coerce")
-    finite = np.isfinite(out["delta_map_log_evidence"].to_numpy(dtype=float))
-    return out.loc[finite].copy()
+    out["delta_map_log_evidence"] = pd.to_numeric(
+        out["delta_map_log_evidence"],
+        errors="coerce",
+    )
+    values = out["delta_map_log_evidence"].to_numpy(dtype=float)
+    return out.loc[~np.isnan(values)].copy()
+
+
+def _quantile_preserving_infinity(
+    diagnostics,
+    values: Sequence[float],
+    q: float,
+) -> float:
+    """Use ordinary quantiles unless extended-real values require no interpolation."""
+
+    if not values:
+        return float("nan")
+    array = np.asarray(values, dtype=float)
+    if np.any(np.isinf(array)):
+        return float(np.quantile(array, q, method="inverted_cdf"))
+    return diagnostics._quantile(values, q)
 
 
 def _apply_numeric_evidence_wrappers(diagnostics) -> None:
@@ -203,7 +221,7 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
             evidence_col: str = "log_evidence",
         ) -> pd.DataFrame:
             key_columns = tuple(key_cols)
-            return original_delta(
+            result = original_delta(
                 _best_duplicate_key_evidence(
                     _coerce_numeric_evidence(current_map_scores, evidence_col),
                     key_columns,
@@ -215,6 +233,11 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
                     evidence_col,
                 ),
                 key_cols=key_cols,
+                evidence_col=evidence_col,
+            )
+            return _normalize_wrong_map_delta_output(
+                result,
+                key_cols=key_columns,
                 evidence_col=evidence_col,
             )
 
@@ -237,7 +260,7 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
             model_col: str = "model",
         ) -> pd.DataFrame:
             key_columns = tuple(group_cols) + (model_col,)
-            return original_absolute(
+            result = original_absolute(
                 _best_duplicate_key_evidence(
                     _coerce_numeric_evidence(current_map_scores, evidence_col),
                     key_columns,
@@ -254,6 +277,10 @@ def _apply_numeric_evidence_wrappers(diagnostics) -> None:
                 exact_trajectory_models=exact_trajectory_models,
                 evidence_col=evidence_col,
                 model_col=model_col,
+            )
+            return _normalize_wrong_map_absolute_output(
+                result,
+                evidence_col=evidence_col,
             )
 
         _mark_numeric(
@@ -279,14 +306,95 @@ def wrong_map_rat_bootstrap_patch_current(diagnostics) -> bool:
 
 
 def _coerce_numeric_evidence(frame: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
-    """Return rows whose evidence column can be interpreted as finite numeric values."""
+    """Return numeric evidence rows while preserving valid exact zero evidence."""
 
     out = frame.copy()
     if out.empty or evidence_col not in out.columns:
         return out
     out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
-    finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
-    return out.loc[finite].copy()
+    values = out[evidence_col].to_numpy(dtype=float)
+    if np.any(np.isposinf(values)):
+        raise ValueError("wrong-map log_evidence must be finite or -inf")
+    return out.loc[~np.isnan(values)].copy()
+
+
+def _normalize_wrong_map_delta_output(
+    frame: pd.DataFrame,
+    *,
+    key_cols: Sequence[str],
+    evidence_col: str,
+) -> pd.DataFrame:
+    """Restore exact-zero evidence semantics after pairwise wrong-map matching."""
+
+    if frame.empty:
+        return frame
+    out = frame.copy()
+    current_col = f"{evidence_col}_current_map"
+    wrong_col = f"{evidence_col}_wrong_map"
+    if current_col not in out.columns or wrong_col not in out.columns:
+        return out
+
+    current = pd.to_numeric(out[current_col], errors="coerce").to_numpy(dtype=float)
+    wrong = pd.to_numeric(out[wrong_col], errors="coerce").to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        delta = current - wrong
+    both_impossible = np.isneginf(current) & np.isneginf(wrong)
+    delta[both_impossible] = 0.0
+    out["delta_vs_wrong_environment_map"] = delta
+
+    if "wrong_map_best_model" in out.columns:
+        event_columns = [
+            column for column in key_cols if column != "model" and column in out.columns
+        ]
+        finite_wrong = np.isfinite(wrong)
+        if event_columns:
+            marker = "__wrong_map_has_finite_evidence"
+            grouped = out[event_columns].copy()
+            grouped[marker] = finite_wrong
+            has_finite = (
+                grouped.groupby(
+                    event_columns,
+                    sort=False,
+                    dropna=False,
+                )[marker]
+                .transform("any")
+                .to_numpy(dtype=bool)
+            )
+        else:
+            has_finite = np.full(len(out), bool(np.any(finite_wrong)), dtype=bool)
+        out.loc[~has_finite, "wrong_map_best_model"] = ""
+    return out
+
+
+def _normalize_wrong_map_absolute_output(
+    frame: pd.DataFrame,
+    *,
+    evidence_col: str,
+) -> pd.DataFrame:
+    """Preserve infinite attenuation and suppress all-impossible pseudo-winners."""
+
+    if frame.empty:
+        return frame
+    out = frame.copy()
+    real_col = f"{evidence_col}_real_map"
+    wrong_col = f"{evidence_col}_wrong_map"
+    if real_col not in out.columns or wrong_col not in out.columns:
+        return out
+
+    real = pd.to_numeric(out[real_col], errors="coerce").to_numpy(dtype=float)
+    wrong = pd.to_numeric(out[wrong_col], errors="coerce").to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        delta = real - wrong
+    both_impossible = np.isneginf(real) & np.isneginf(wrong)
+    delta[both_impossible] = 0.0
+    out["delta_map_log_evidence"] = delta
+
+    if "statistic_type" in out.columns:
+        selected = out["statistic_type"].astype(str).eq("real_map_selected_model")
+        fabricated = selected.to_numpy(dtype=bool) & np.isneginf(real)
+        if np.any(fabricated):
+            out = out.loc[~fabricated].copy()
+    return out
 
 
 def _best_duplicate_key_evidence(

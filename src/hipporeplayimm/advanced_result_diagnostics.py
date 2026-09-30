@@ -1436,19 +1436,70 @@ def model_disagreement_events(
     if scores.empty:
         return pd.DataFrame()
     margins = evidence_margin_table(scores, group_cols=group_cols)
+    margin_best: dict[tuple[object, ...], str] = {}
+    if not margins.empty:
+        for _, margin_row in margins.iterrows():
+            margin_key = tuple(margin_row[column] for column in group_cols)
+            margin_best[margin_key] = str(
+                margin_row.get("best_model_by_evidence", "")
+            )
+
     ok = _successful_rows(scores)
     rows = []
     for key, group in ok.groupby(list(group_cols), sort=False):
         key_tuple = key if isinstance(key, tuple) else (key,)
-        row = {column: value for column, value in zip(group_cols, key_tuple, strict=True)}
+        row = {
+            column: value
+            for column, value in zip(group_cols, key_tuple, strict=True)
+        }
         models = set(group["model"].astype(str)) if "model" in group else set()
-        best = ""
+
+        flagged_best = ""
         if "is_best_model" in group:
             winners = group[_bool_column(group, "is_best_model")]
             if not winners.empty:
-                best = str(winners.iloc[0].get("model", ""))
-        if not best and "log_evidence" in group:
-            best = str(group.sort_values("log_evidence", ascending=False).iloc[0].get("model", ""))
+                flagged_best = str(winners.iloc[0].get("model", ""))
+
+        margin_value = margin_best.get(key_tuple)
+        if margin_value is not None:
+            if not margin_value:
+                # A scored all-impossible comparable set has no
+                # evidence-defined winner, even if an older artifact carries
+                # a stale is_best_model flag.
+                best = ""
+            elif "evidence_comparable" in group.columns:
+                # Prefer the freshly recomputed exact-comparable winner over
+                # serialized flags that may include a truncated lower bound.
+                best = margin_value
+            else:
+                # Legacy tables without support metadata can still carry a
+                # trustworthy serialized best-model flag.
+                best = flagged_best or margin_value
+        elif "evidence_comparable" in group.columns:
+            # No exact-comparable evidence was available for this event.
+            best = ""
+        else:
+            best = flagged_best
+            if not best and "log_evidence" in group:
+                evidence = pd.to_numeric(group["log_evidence"], errors="coerce")
+                positive_infinite = np.isposinf(
+                    evidence.to_numpy(dtype=float)
+                )
+                usable = ~(evidence.isna() | positive_infinite)
+                candidates = group.loc[usable].copy()
+                if not candidates.empty:
+                    candidate_values = pd.to_numeric(
+                        candidates["log_evidence"],
+                        errors="coerce",
+                    ).to_numpy(dtype=float)
+                    if np.any(np.isfinite(candidate_values)):
+                        best = str(
+                            candidates.iloc[int(np.argmax(candidate_values))].get(
+                                "model",
+                                "",
+                            )
+                        )
+
         probability_entropy = np.nan
         if probability_col in group:
             p = group[probability_col].dropna().to_numpy(float)
@@ -1459,8 +1510,12 @@ def model_disagreement_events(
         row.update(
             {
                 "best_model": best,
-                "has_sorted_spike": any(model.startswith("sorted-spike") for model in models),
-                "has_clusterless": any(model.startswith("clusterless") for model in models),
+                "has_sorted_spike": any(
+                    model.startswith("sorted-spike") for model in models
+                ),
+                "has_clusterless": any(
+                    model.startswith("clusterless") for model in models
+                ),
                 "has_goal": any("goal" in model for model in models),
                 "has_reverse": any("reverse" in model for model in models),
                 "model_probability_entropy": probability_entropy,
@@ -1472,7 +1527,9 @@ def model_disagreement_events(
     if not margins.empty:
         out = out.merge(margins, on=list(group_cols), how="left")
     if "evidence_margin_category" in out:
-        out["is_low_margin_disagreement"] = out["evidence_margin_category"].isin(["tie", "weak"])
+        out["is_low_margin_disagreement"] = out[
+            "evidence_margin_category"
+        ].isin(["tie", "weak"])
     return out
 
 

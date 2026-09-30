@@ -295,3 +295,69 @@ def test_load_event_scores_preserves_negative_infinite_exact_evidence(tmp_path):
     assert np.isposinf(event["trajectory_minus_nontrajectory_exact_log_evidence"])
     assert bool(event["trajectory_strict_win"])
 
+
+
+
+def test_all_impossible_event_is_unresolved_in_paper_effect_summary(tmp_path):
+    scores = tmp_path / "event_model_evidence.csv"
+    output = tmp_path / "paper-all-impossible"
+    pd.DataFrame(
+        [
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "stationary",
+                "log_evidence": -np.inf,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-diffusion",
+                "log_evidence": -np.inf,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+            {
+                "session": "Rat1/Open1",
+                "event_index": 0,
+                "model": "sorted-spike-state-space-momentum",
+                "log_evidence": -np.inf,
+                "status": "success",
+                "evidence_support": "exact_full_grid",
+                "evidence_comparable": True,
+            },
+        ]
+    ).to_csv(scores, index=False)
+
+    tables = summarize_paper_effects(
+        scores,
+        output,
+        bootstrap_replicates=0,
+    )
+
+    event = tables["event_effects"].iloc[0]
+    summary = tables["summary"].iloc[0]
+
+    assert event["strict_best_model"] == ""
+    assert event["best_exact_trajectory_model"] == ""
+    assert event["best_exact_nontrajectory_model"] == ""
+    assert pd.isna(event["trajectory_strict_win"])
+    assert pd.isna(event["trajectory_certified_win"])
+    assert event["trajectory_certification_reason"] == "all_compared_evidence_impossible"
+    assert event["momentum_model"] == ""
+    assert event["diffusion_model"] == ""
+    assert pd.isna(event["momentum_beats_diffusion_reported"])
+    assert pd.isna(event["momentum_beats_diffusion_certified"])
+    assert pd.isna(event["diffusion_beats_momentum_certified"])
+    assert event["momentum_vs_diffusion_certification"] == "all_compared_evidence_impossible"
+
+    assert summary["trajectory_strict_events"] == 0
+    assert summary["trajectory_certified_events"] == 0
+    assert summary["momentum_vs_diffusion_reported_events"] == 0
+    assert summary["momentum_vs_diffusion_certified_events"] == 0
+    assert summary["momentum_vs_diffusion_certified_losses"] == 0
+    assert summary["momentum_diffusion_paired_events"] == 0

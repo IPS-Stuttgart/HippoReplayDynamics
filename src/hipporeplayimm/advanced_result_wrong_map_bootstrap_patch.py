@@ -279,14 +279,15 @@ def wrong_map_rat_bootstrap_patch_current(diagnostics) -> bool:
 
 
 def _coerce_numeric_evidence(frame: pd.DataFrame, evidence_col: str) -> pd.DataFrame:
-    """Return rows whose evidence column can be interpreted as finite numeric values."""
+    """Return rows with usable numeric evidence, preserving valid negative infinity."""
 
     out = frame.copy()
     if out.empty or evidence_col not in out.columns:
         return out
     out[evidence_col] = pd.to_numeric(out[evidence_col], errors="coerce")
-    finite = np.isfinite(out[evidence_col].to_numpy(dtype=float))
-    return out.loc[finite].copy()
+    values = out[evidence_col].to_numpy(dtype=float)
+    usable = ~(np.isnan(values) | np.isposinf(values))
+    return out.loc[usable].copy()
 
 
 def _best_duplicate_key_evidence(
@@ -294,7 +295,7 @@ def _best_duplicate_key_evidence(
     key_cols: Sequence[str],
     evidence_col: str,
 ) -> pd.DataFrame:
-    """Keep the highest finite evidence row for each wrong-map comparison key."""
+    """Keep the highest usable evidence row for each wrong-map comparison key."""
 
     if frame.empty or evidence_col not in frame.columns:
         return frame

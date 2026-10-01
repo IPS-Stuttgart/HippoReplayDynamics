@@ -341,6 +341,12 @@ def run_audit(args, p):
 
 def report(out):
     manifest = verify_manifest(out, "2.0")
+    if manifest["stage"] == "feasibility":
+        try:
+            from scripts.denovellis_post_error_v2_readout import report_feasibility
+        except ModuleNotFoundError:
+            from denovellis_post_error_v2_readout import report_feasibility
+        return report_feasibility(out)
     animals = pd.read_csv(out / (PREFIX + "by_animal.csv"))
     trials = pd.read_csv(out / (PREFIX + "trial_inventory.csv"))
     lines = [
@@ -370,8 +376,8 @@ def report(out):
         "## Work withheld",
         "",
         "RUN fits, sequence validation, the frozen calibration bank, biological regression and",
-        "biological panels have not been run. Downstream inference is not implemented past a failed audit.",
-        "Missing values are not zero neural evidence. This stop neither supports nor refutes corrective replay.",
+        "biological panels have not been run. A passed audit permits only RUN readout validation next.",
+        "Missing values are not zero neural evidence. This audit neither supports nor refutes corrective replay.",
         "",
         f"Producer: `{manifest['provenance']['code_commit']}`. Seed: {manifest['protocol']['seed']}.",
         "",
@@ -391,4 +397,12 @@ def run(args, p):
     prerequisite = verify_manifest(args.prerequisite_dir, "2.0")
     if prerequisite["protocol"] != p or not prerequisite.get("audit_passed"):
         raise ValueError("V2 necessary coverage audit failed; downstream work is blocked")
+    if args.stage == "feasibility":
+        try:
+            from scripts.denovellis_post_error_v2_readout import run_feasibility
+        except ModuleNotFoundError:
+            from denovellis_post_error_v2_readout import run_feasibility
+        return run_feasibility(args, p, prerequisite)
+    if not prerequisite.get("feasibility_passed"):
+        raise ValueError("Validated within-epoch readout is required before calibration; downstream work is blocked")
     raise ValueError("Validated within-epoch readout and frozen calibration are required; no biological scores produced")

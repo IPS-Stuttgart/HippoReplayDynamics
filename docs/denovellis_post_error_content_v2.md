@@ -73,3 +73,25 @@ records a persisted UTC deadline. Execute through the detached committed launche
 on gpuserver6000, with atomic checkpoints and per-input hashes. Keep v1/concurrent
 studies untouched. Archive compact evidence only, with stages actually completed
 distinguished from prospective work. No data search, new dynamics model or email.
+# Causal RUN Readout Implementation
+
+After the necessary temporal bound passes, `--stage feasibility` consumes the
+hashed v2 audit. Only epochs with final-third eligible transitions need neural
+fits; all original epochs remain in the cohort inventory. Training uses complete
+first-third traversals, and its position array is physically cropped before any
+interpolation or occupancy calculation. Both endpoints of every training and
+validation tracking interval must have finite position and RUN speed above
+4 cm/s. No interval can bridge a tracking gap above 250 ms. The nonoverlapping
+20-ms validation grid is anchored at the middle-third boundary; complete windows
+must lie in retained validation traversals. Zero-spike windows remain included.
+
+Unique arms without training or validation support are unavailable, not measured
+biological failures. Otherwise balanced accuracy and both recalls are compared
+to the frozen thresholds. Complete per-bin validation predictions are retained
+on the server for independent confusion-count verification. No prior-session
+map or alternate encoder is substituted. A failed actual coverage floor stops
+the study before sequence validation, simulation calibration or regression.
+
+`verify_denovellis_post_error_v2.py` separately rebuilds raw behavioral visits,
+temporal eligibility, exposure and the necessary coverage bound; its audit does
+not depend on the producer's transition/coverage implementations.

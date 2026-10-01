@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--source-archive", type=Path, required=True)
     parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--reference-inventory", type=Path, help="Immutable version-1 header inventory for amended source reconciliation")
     parser.add_argument("--seed", type=int, default=20261001)
     args = parser.parse_args()
     protocol = json.loads(args.protocol.read_text())
@@ -70,6 +71,11 @@ def main():
     provenance = build_script_provenance(input_paths={"protocol": args.protocol})
     if args.stage == "acquire":
         result = acquire(args, protocol)
+    elif protocol.get("delivery_scope") == "bounded_original_source_audit_before_neural_processing":
+        if args.reference_inventory is None:
+            parser.error("The original-source audit requires --reference-inventory")
+        from scripts.odor_place_original_source_audit import dispatch
+        result = dispatch(args, protocol)
     else:
         from scripts.odor_place_feasibility_core import dispatch
         result = dispatch(args, protocol)

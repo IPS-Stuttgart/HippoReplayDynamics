@@ -34,3 +34,28 @@ verified, stop this branch without threshold relaxation or endpoint substitution
 
 Published source metadata: https://api.figshare.com/v2/articles/19620783/versions/3
 Archived author code: https://github.com/JadhavLab/Jadhav-Lab-Codes-JHB/tree/88d5f8d2bb39796b8656dc42bd42969a7bbe8697/BetaOdorProject
+
+## Source semantics, fixed before the amended coverage run
+
+The archived spatial-analysis cohort identifies CS31, CS33, CS34, CS35 and CS44
+as full-maze animals, consistent with the published five/full versus three/short
+split. Source task fields must additionally say `type=run, environment=odorplace`.
+One-based digital channels are: wells 1/2, nose poke 5, odor solenoids 22/23,
+reward pumps 19/20. These assignments come from author code, not outcomes.
+
+Inspection of one original CS31 epoch shows a valid nose-poke sample in
+`nosepokeWindow` but an earlier aborted sample in compiled `runTrialBounds`.
+Keep compiled boundaries as separate source records. The valid raw nose-poke
+must match original odor triggers, stored sample boundaries, independent odor
+solenoid, first chosen-well sensor and tracking. Never fit an offset or infer a
+cue from choice plus correctness. Any intervening aborted or unresolved sample
+excludes the transition; no skipping to the next favorable completed trial.
+
+The downloaded ZIP's 1,103 entries include no separate documentation files,
+despite the release description mentioning documentation. Source semantics use
+the published methods and pinned public code. Processed position may already be
+interpolated; applying a timestamp-gap rule cannot recover omitted raw gaps.
+
+The acquisition manifest keeps its original protocol hash. The subsequent audit
+manifest records these added source-semantics fields separately; the source pin
+and screening thresholds are unchanged. No association has been inspected.

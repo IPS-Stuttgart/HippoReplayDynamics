@@ -41,6 +41,17 @@
   "validate_archive_crc_for_selected_members": true,
   "extract_archive_to_filesystem": false,
   "author_code_commit": "88d5f8d2bb39796b8656dc42bd42969a7bbe8697",
+  "full_maze_animals_source_code": ["CS31", "CS33", "CS34", "CS35", "CS44"],
+  "full_maze_identity_evidence": "published_five_full_maze_animals_and_archived_cs_getRunTimes_cs_posVelocity_spatial_cohort",
+  "dio_channels_one_based": {
+    "left_well": 1, "right_well": 2, "nose_poke": 5,
+    "left_odor": 22, "right_odor": 23,
+    "left_pump": 19, "right_pump": 20
+  },
+  "v1_reference_inventory_sha256": "81b020606a70332bf28fb041b7cfe9f04a515c5c9d57f993c470201a3751586a",
+  "raw_sensor_boundaries_primary_compiled_boundaries_diagnostic": true,
+  "next_trial_is_immediately_following_raw_sample_without_skipping_aborts": true,
+  "intervening_unresolved_or_aborted_cue_excludes_transition": true,
   "preserve_v1_stopgate": true,
   "no_threshold_relaxation": true,
   "no_association_stage": true,

@@ -13,6 +13,7 @@ from scripts.denovellis_post_error_core import (
     sequence_test, valid_intervals, weighted_correlation, wilson_upper,
 )
 from scripts.denovellis_post_error_neural import event_seed, fit_encoding, make_graph, marked_file
+from scripts.verify_denovellis_post_error_content import position_visits
 
 WELLS = np.array([[0, 0], [-40, 0], [40, 0]])
 PROTOCOL = json.loads((Path(__file__).parents[1] / "docs/denovellis_post_error_protocol.json").read_text())
@@ -65,6 +66,8 @@ def test_repeated_well_bouts_keep_first_pause():
     assert [r["well"] for r in v] == [2, 1, 3]
     assert v[1]["pause_end_s"] == pytest.approx(.5)
     assert v[1]["departure_s"] == pytest.approx(.9)
+    independently = position_visits({"figure_data": {"time": t.tolist(), "xy": xy.tolist()}, "geometry": {"wells": WELLS.tolist()}}, PROTOCOL)
+    assert v == independently
 
 
 def test_missing_position_resets_history():

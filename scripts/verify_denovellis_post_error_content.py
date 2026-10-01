@@ -20,6 +20,35 @@ def digest(path):
     return h.hexdigest()
 
 
+def position_visits(packet, protocol):
+    t = np.asarray(packet["figure_data"]["time"], float)
+    xy = np.asarray(packet["figure_data"]["xy"], float)
+    wells = np.asarray(packet["geometry"]["wells"], float)
+    hits = np.linalg.norm(xy[:, None]-wells[None], axis=2) <= protocol["well_radius_cm"]
+    bad = ~np.isfinite(xy).all(axis=1) | (hits.sum(axis=1) > 1)
+    bad[1:] |= np.diff(t) > protocol["max_tracking_gap_s"]
+    segment = np.cumsum(bad)
+    labels = np.where(hits.sum(axis=1) == 1, hits.argmax(axis=1)+1, 0)
+    labels[bad] = 0
+    bouts = []
+    i = 0
+    while i < len(t):
+        if not labels[i]:
+            i += 1
+            continue
+        start, well = i, int(labels[i])
+        while i < len(t) and labels[i] == well:
+            i += 1
+        boundary = min(i, len(t)-1)
+        row = dict(well=well, history_segment=int(segment[start]), start_index=start, end_index=i,
+                   arrival_s=float(t[start]), departure_s=float(t[boundary]), pause_end_s=float(t[boundary]))
+        if bouts and bouts[-1]["well"] == well and bouts[-1]["history_segment"] == row["history_segment"]:
+            bouts[-1]["departure_s"], bouts[-1]["end_index"] = row["departure_s"], row["end_index"]
+        else:
+            bouts.append(row)
+    return bouts
+
+
 def verify(root):
     manifest = json.loads((root / (PREFIX + "manifest.json")).read_text())
     p = manifest["protocol"]
@@ -37,6 +66,10 @@ def verify(root):
     visits = pd.read_csv(root / (PREFIX + "all_well_visits.csv"))
     events = pd.read_csv(root / (PREFIX + "native_event_assignments.csv"))
     gate = pd.read_csv(root / (PREFIX + "gate_summary.csv"))
+    inputs = pd.read_csv(root / (PREFIX + "input_inventory.csv"))
+    hashed = inputs[inputs.sha256.notna()].drop_duplicates("path")
+    for row in hashed.itertuples():
+        check("consumed_raw_input_hash:" + row.path, digest(row.path) == row.sha256, row.sha256)
     check("unique_trials", not trials.trial_id.duplicated().any(), len(trials))
     check("unique_event_assignments", not events.duplicated(["animal", "day", "epoch", "ripple_number"]).any() if len(events) else True, len(events))
     check("no_route_content_imputation", not len(events) or events[["correct_route_content", "mistaken_route_content", "sequence_validated"]].isna().all().all(), "feasibility is not neural decoding")
@@ -45,6 +78,9 @@ def verify(root):
     bad_rules = []
     for session, frame in visits.groupby("session"):
         packet = json.loads((root / "checkpoints" / (session + ".json")).read_text())
+        independent = position_visits(packet, p)
+        saved = frame.sort_values("visit_index").to_dict("records")
+        check("raw_position_visit_reconstruction:" + session, len(independent) == len(saved) and all(all(a[k] == b[k] for k in a) for a, b in zip(independent, saved, strict=False)), len(independent))
         geom = np.asarray(packet["geometry"]["segments"], float)
         wells = np.asarray(packet["geometry"]["wells"], float)
         # The center well is the endpoint shared by the central-stem segment metadata.
@@ -114,7 +150,8 @@ def verify(root):
         check("independent_gate:" + name, float(saved.observed) == value and bool(saved.passed) == (value >= limits[name]), value)
     check("overall_nonvacuous", bool(gate.iloc[-1].passed) == all(gate.iloc[:-1].passed) and (not manifest["feasibility_passed"] or len(eligible) > 0), manifest["feasibility_passed"])
     check("epoch_accounting", len(inventory) == len(pd.read_csv(root / (PREFIX + "task_inventory.csv"))), len(inventory))
-    summary = {"verification_passed": all(x["passed"] for x in checks), "n_checks": len(checks), "failed_checks": [x for x in checks if not x["passed"]], "independent_counts": counts}
+    summary = {"verification_passed": all(x["passed"] for x in checks), "n_checks": len(checks), "failed_checks": [x for x in checks if not x["passed"]], "independent_counts": counts,
+               "verifier_source_sha256": digest(Path(__file__)), "n_consumed_inputs_rehashed": len(hashed)}
     pd.DataFrame(checks).to_csv(root / (PREFIX + "verification_checks.csv"), index=False)
     (root / (PREFIX + "verification.json")).write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))

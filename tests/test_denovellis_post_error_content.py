@@ -218,6 +218,32 @@ def test_graph_encoding_never_uses_future_marks():
         np.testing.assert_allclose(fitted.rate[k], refitted.rate[k])
 
 
+def test_batched_kde_matches_direct_mark_sum():
+    graph = graph_fixture()
+    xy = np.tile(graph.xy, (4, 1))
+    t = np.arange(len(xy))*.02
+    f = np.column_stack([xy, xy])
+    marks = {1: (t+.001, f), 2: (t+.001, f)}
+    fitted = fit_encoding(graph, t, xy, np.full(len(xy), 10.), marks, start=0, end=t[-1])
+    starts, ends = np.arange(12)*.02, (np.arange(12)+1)*.02
+    got, counts, active = fitted.likelihood(starts, ends, marks)
+    ll = -(ends-starts)[:, None]*sum(fitted.rate.values())[None, :]
+    for tet, (mt, features) in marks.items():
+        for query, at in zip(features, mt, strict=True):
+            if not starts[0] <= at < ends[-1]:
+                continue
+            b = np.searchsorted(starts, at, side="right")-1
+            d2 = np.sum(((fitted.features[tet]-query)/24.)**2, axis=1)
+            use = d2 <= 36
+            if not use.any():
+                use[:] = True
+            intensity = np.exp(-.5*d2[use]) @ fitted.spatial[tet][use] / fitted.occupancy
+            ll[b] += np.log(np.maximum(intensity, np.finfo(float).tiny))
+    ll[:, ~fitted.occupied] = -np.inf
+    np.testing.assert_allclose(got, normalize_likelihood(ll), atol=1e-12, rtol=1e-10)
+    assert list(counts) == [2]*12 and list(active) == [2]*12
+
+
 def test_event_seed_is_stable_without_python_hash():
     assert event_seed(20261001, "bon", 3, 2, 1) == event_seed(20261001, "bon", 3, 2, 1)
     assert event_seed(20261001, "bon", 3, 2, 1) != event_seed(20261001, "bon", 3, 2, 2)

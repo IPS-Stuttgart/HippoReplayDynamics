@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import signal
 import subprocess
 import sys
 
@@ -23,10 +24,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--job-dir", type=Path, required=True)
     parser.add_argument("--supervise", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--stop", action="store_true", help="Stop only this launcher's recorded process group and preserve terminal status")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if socket.gethostname().split(".")[0] not in {"gpuserver6000", "workstation2"}:
         parser.error("This experiment is restricted to gpuserver6000")
+    if args.stop:
+        launch = json.loads((args.job_dir / "launch.json").read_text())
+        pid = int(launch["supervisor_pid"])
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode().replace("\x00", " ")
+        if "launch_denovellis_post_error_content.py --supervise --job-dir " + str(args.job_dir) not in cmdline or os.getpgid(pid) != pid:
+            parser.error("Recorded PID does not match this job's isolated supervisor")
+        os.killpg(pid, signal.SIGTERM)
+        record(args.job_dir / "status.json", {"status": "terminated_for_implementation_fix", "finished_at_utc": datetime.now(UTC).isoformat(), "reason": "restart same estimator with batched numerical evaluation; old logs preserved"})
+        return
     if args.supervise:
         job = json.loads((args.job_dir / "job.json").read_text())
         record(args.job_dir / "status.json", {"status": "running", "pid": os.getpid()})

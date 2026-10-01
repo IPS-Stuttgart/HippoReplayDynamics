@@ -6,7 +6,7 @@ import re
 
 import numpy as np
 from scipy.io import loadmat
-from scipy.spatial import cKDTree
+from scipy.spatial import cKDTree, distance
 from scipy.sparse.csgraph import shortest_path
 
 try:
@@ -145,16 +145,16 @@ class Encoding:
             bins = np.searchsorted(starts, times, side="right")-1
             keep = (bins >= 0) & (times < ends[np.maximum(bins, 0)])
             features, bins = features[keep], bins[keep]
-            for query, b in zip(features, bins, strict=True):
-                neighbors = self.trees[tet].query_ball_point(query/self.mark_sigma, 6)
-                if not neighbors:
-                    neighbors = list(range(len(reference)))
-                neighbors = np.asarray(neighbors)
-                weight = np.exp(-.5*np.sum(((reference[neighbors]-query)/self.mark_sigma)**2, axis=1))
-                intensity = weight @ self.spatial[tet][neighbors] / self.occupancy
-                # Constant mark-density factor does not affect a normalized posterior.
-                ll[b] += np.log(np.maximum(intensity, np.finfo(float).tiny))
-                counts[b] += 1
+            for start in range(0, len(features), 64):
+                queries = features[start:start+64]
+                d2 = distance.cdist(queries/self.mark_sigma, reference/self.mark_sigma, "sqeuclidean")
+                neighbors = d2 <= 36
+                neighbors[~neighbors.any(axis=1)] = True
+                weight = np.exp(-.5*d2)*neighbors
+                intensity = weight @ self.spatial[tet] / self.occupancy
+                # Batched sums are the same six-bandwidth KDE, without per-spike gathers.
+                np.add.at(ll, bins[start:start+64], np.log(np.maximum(intensity, np.finfo(float).tiny)))
+            counts += np.bincount(bins, minlength=len(starts))
             for b in np.unique(bins):
                 active[b] += 1
         ll[:, ~self.occupied] = -np.inf

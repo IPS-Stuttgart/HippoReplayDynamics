@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "study": "widloski_structural_updating_feasibility_v1",
+  "scope": "feasibility_only",
+  "animals": ["Billy3", "Curly2", "Goethe2"],
+  "allow_joint_goal_changes": true,
+  "tracking_gap_s": 0.25,
+  "immobility_speed_cm_s": 5.0,
+  "route_tolerance_cm": 1e-8,
+  "minimum_episodes_per_animal": 2,
+  "minimum_days_per_animal": 2,
+  "initial_working_day_cap": 5,
+  "author_response_time_excluded": true,
+  "author_request_auto_send": false,
+  "graph_policy": "documented_behaviorally_checked_fixed_nodes_edges",
+  "censor_policy": "first_outgoing_departure_or_last_sample_before_first_tracking_gap_or_session_end",
+  "control_matching": "same_episode_destination_outdegree_nearest_old_min_cost_then_lexicographic_id_with_replacement_no_event_count_matching",
+  "novelty_policy": "explicit_review_resolution_required",
+  "claim_boundary": "Not retraversed does not mean unknown; barriers were visible. Coverage is not power."
+}

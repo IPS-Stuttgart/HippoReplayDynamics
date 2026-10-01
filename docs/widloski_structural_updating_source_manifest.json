@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "dataset": "Widloski_Foster_2025_processed_release",
+  "release_url": "https://zenodo.org/records/16916108",
+  "animal_order": ["Billy3", "Curly2", "Goethe2"],
+  "novelty_resolution": "unresolved",
+  "novelty_note": "The exact before-local-retraversal contrast was not identified in the reviewed materials, but supplementary completeness and related unpublished work require clarification. No automatic novelty pass.",
+  "files": [
+    {
+      "filename": "replayEvents_cellIDshuffle_sameEvents.mat",
+      "expected_md5": "1c93da9c0e3cba217c7f8a30f873ac16",
+      "reader": "headers",
+      "source_url": "https://zenodo.org/records/16916108",
+      "documentation": "Shuffle statistics only. Its 7197 rows are not assumed to align positionally with the 6580 event-statistic rows. No p-values or content metrics are evaluated."
+    },
+    {
+      "filename": "replayEvents_eventStats_rippleThr2sd_wShiftComparison_075secPostReplay_spkDensityAllClusters_sigReplays.mat",
+      "expected_md5": "1e6aabb96dfe3d3310e68a2f5e541734",
+      "reader": "event_identities_v1",
+      "source_url": "https://zenodo.org/records/16916108",
+      "documentation": "plot_replayEvents_rippleStats_allSessions.m lines 617-622 assign columns 43-46 to ind_replay(i), rat, day, sessionNum. Rat_Names/dayFiles are defined in lines 18-26. Only those identity columns are interpreted; elapsedTime and duration are not substituted for event boundaries."
+    },
+    {
+      "filename": "replayEvents_rippleFieldStats_allCells_sigReplays.mat",
+      "expected_md5": "37b3df51894208ea2d3a7b564b711335",
+      "reader": "session_inventory_v1",
+      "source_url": "https://zenodo.org/records/16916108",
+      "documentation": "plot_replayEvents_rippleField_allSessions.m lines 849-853 explicitly assign Data.file, ratName, sessionNum, rat and day. Lines 857-858 assign decoded replays and per-event ratLocs; neither is continuous observed position. Those arrays are not read."
+    }
+  ],
+  "author_code_sources": [
+    {"url": "https://zenodo.org/api/records/15199609/files/plot_replayEvents_rippleStats_allSessions.m/content", "sha256": "bfb0bcd1193844bd4e6dd841aeb571a6dba0c15419358baa4b6e3bb5162b86e2", "review": "Input dependencies lines 35-44 and identity construction lines 617-622 inspected; upstream behavior, clusters, replayEvents and mazeTimes are loaded separately."},
+    {"url": "https://zenodo.org/api/records/15199609/files/plot_replayEvents_rippleField_allSessions.m/content", "sha256": "354c41476e17bbf3aa21d725ab42fe2320dd6dd44527521271fcc1a67d32650b", "review": "Data identity assignments, per-event ratLocs and externally loaded barrierConfig_IDs inspected."},
+    {"url": "https://zenodo.org/api/records/5880582/files/plot_replayEvents_barrierAvoidance_slidingWindow_allSessions.m/content", "sha256": "f9b2e1dc70e83f84178e55e66aad3806afafb6455bf8ee91a067a38f39a6adb7", "review": "Existing analysis aggregates barrier conformity in sliding windows; no first-local-traversal censor found in this source."},
+    {"url": "https://zenodo.org/api/records/5880582/files/plot_replayEvents_barrierAvoidance_distToBarrier_allSessions.m/content", "sha256": "4dc4cd53168cd70a49d67ca49bf4f8666c69fff56a2d3b7a1b46914280d6ac50", "review": "Existing analysis measures spatial extent of barrier conformity; spatial remoteness alone is not a new claim."},
+    {"url": "https://zenodo.org/api/records/5880582/files/plot_timeLagMaps_sliceAverage_allSessions.m/content", "sha256": "169eb683081a80510cfdd9a541e6503fbcb06010d552ce033f91f2076b0b502c", "review": "Existing time-lag map analysis already tests topology outside selected replay events."}
+  ],
+  "unprovided_capabilities": {
+    "full_session_position": {"status": "absent", "reason": "The inspected release stores per-event ratLocs and occupancy summaries, not the upstream continuous positions loaded by author code."},
+    "sorted_spikes": {"status": "absent", "reason": "Upstream clusters are loaded separately by author code; no full-session sorted spike trains are provided in these three files."},
+    "cross_session_unit_identities": {"status": "absent", "reason": "Aggregate rateMapSum and cell-count products do not identify units across configurations."},
+    "replay_intervals": {"status": "unresolved", "reason": "Native event indices are verified; absolute start/end intervals and clock alignment require upstream timePoints/replayEvents. Do not infer them from elapsedTime, duration or concatenated decoded paths."},
+    "barrier_geometry": {"status": "unresolved", "reason": "barrierDiff and distance fields do not supply a verified physical graph/configuration history; author code loads barrierConfig_IDs and experiment information separately."},
+    "session_chronology": {"status": "unresolved", "reason": "Recording dates and within-day labels are verified, but complete intervening exposure and session entry/exit times are not."},
+    "goal_trial_timing": {"status": "absent", "reason": "A per-event trial-type summary is not full Home/Random goal identity and trial/reward timing."},
+    "prechange_encoding_support": {"status": "unresolved", "reason": "Cannot verify preceding RUN coverage, synchronized spikes or stable unit mappings from the processed release."}
+  },
+  "prior_art": [
+    {"study": "Widloski and Foster 2022", "url": "https://doi.org/10.1016/j.neuron.2022.02.002", "materials_reviewed": "Author manuscript methods and Figures 2-5, supplementary figure descriptions S1-S10, Zenodo 5880582 code catalog and named barrier/time-lag sources", "existing_result": "Rapid current-configuration conformity, spatial extension from barriers, future-path alignment and largely stable place fields are established.", "exact_contrast_status": "not_identified_in_reviewed_material", "remaining_question": "First renewed local traversal as an exposure boundary at locally unchanged junctions; complete supplement/unpublished analysis clarification remains open."},
+    {"study": "Jensen et al. 2024", "url": "https://www.nature.com/articles/s41593-024-01675-7", "materials_reviewed": "Main article and rodent replay methods; planning_code tree a9c03b4dd4c1df747dd8e9608621652b1f935cad", "existing_result": "Planning-model comparison includes goal-directed replay and changes across successive replay sequences. Rodent recordings remain available from the original authors on request.", "exact_contrast_status": "not_identified_in_reviewed_material", "remaining_question": "No novelty claim from an unsuccessful keyword search; confirm whether related experience-conditioned analyses exist."},
+    {"study": "Widloski and Foster 2025", "url": "https://www.nature.com/articles/s41467-025-65181-5", "materials_reviewed": "Updated article, public data record 16916108, code record 15199609 and source assignments inspected 2026-10-01", "existing_result": "Ripple-independent replay and configuration-dependent ripple fields are established; the release is processed data from 37 sessions in three animals.", "exact_contrast_status": "not_identified_in_reviewed_material", "remaining_question": "Obtain continuous behavior and neural inputs, explicit configurations and native intervals before the proposed opportunity test."}
+  ]
+}

@@ -61,6 +61,10 @@ the raw conversion can add short boundary flickers/backtracks. The undocumented
 details of the source's string processing remain a limitation. Dwell-frame totals,
 documented task sensors, tracking gaps and source-defined endpoint order are
 checked separately. A raw-grid disagreement alone is not a tracking failure.
+Boundary shifts compare raw-grid labels with their own zero-offset baseline;
+native-versus-raw label agreement is a different reported field. Neither this
+raw-grid diagnostic nor unpublished string processing proves a validated route
+classifier under boundary uncertainty.
 
 ## Cohort and chronology
 

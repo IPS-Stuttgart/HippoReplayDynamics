@@ -86,7 +86,9 @@ def scan_file(path, dataset, protocol):
                 alt = classify_route(s, row, total_limit=rules["optimized_total_string_length_strictly_below"], segment_limit=rules["segment_string_length_strictly_below"])
                 sensitivity.append([offset, alt["route_label"]])
             row["boundary_sensitivity_labels"] = json.dumps(sensitivity)
-            row["boundary_route_label_stable"] = all(label == row["route_label"] for _, label in sensitivity)
+            baseline = next(label for offset, label in sensitivity if offset == 0)
+            row["boundary_route_label_stable"] = all(label == baseline for _, label in sensitivity)
+            row["native_raw_route_label_agree"] = baseline == row["route_label"]
             gap_labels = []
             for gap in rules["tracking_gap_sensitivity_ms"]:
                 info = inspect_log(log, gap)

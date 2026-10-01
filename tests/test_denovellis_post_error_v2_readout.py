@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from scripts._provenance import file_sha256
 from scripts.denovellis_post_error_core import build_transitions, reconstruct_visits, score_visits, valid_intervals
 from scripts.denovellis_post_error_neural import make_graph
 from scripts.denovellis_post_error_v2 import FROZEN, restrict_transition
@@ -16,7 +17,7 @@ from scripts.denovellis_post_error_v2_readout import (
     training_samples,
     validation_windows,
 )
-from scripts.verify_denovellis_post_error_v2 import independent_trials
+from scripts.verify_denovellis_post_error_v2 import independent_trials, verify_readout
 
 P = json.loads(FROZEN.read_text())
 
@@ -147,3 +148,98 @@ def test_independent_raw_trial_reconstruction(tracking_gap, immobile_speed):
         assert a["final_third_eligible"] == b["eligible"]
         assert a["next_outcome"] == b["outcome"]
         assert a["usable_exposure_s"] == pytest.approx(b["exposure_s"])
+
+
+def verification_fixture(tmp_path):
+    prefix = "denovellis_post_error_"
+    audit, out = tmp_path / "audit", tmp_path / "readout"
+    audit.mkdir()
+    out.mkdir()
+    (out / "checkpoints").mkdir()
+    (audit / (prefix + "manifest.json")).write_text(json.dumps({"protocol": P, "audit_passed": True, "output_sha256": {}}))
+    trials = pd.DataFrame(
+        [
+            {
+                "session": f"a-{day}",
+                "animal": "a",
+                "day": day,
+                "final_third_eligible": True,
+                "decoder_qualified_transition": False,
+                "primary_cohort_eligible": False,
+                "next_outcome": o,
+            }
+            for day in (1, 2)
+            for o in ("correction", "repeated_error")
+        ]
+    )
+    qc = []
+    for day in (1, 2):
+        session = f"a-{day}"
+        qc.append(
+            {
+                "session": session,
+                "status": "failed_accuracy",
+                "reason": "",
+                "decoder_qc_passed": False,
+                "train_end_s": 1,
+                "validation_end_s": 2,
+                "balanced_accuracy": 0.5,
+                "arm0_recall": 1.0,
+                "arm1_recall": 0.0,
+                "n_arm_windows": 4,
+                "zero_spike_windows": 1,
+            }
+        )
+        windows = pd.DataFrame(
+            {
+                "start_time_s": [1.0, 1.02, 1.04, 1.06],
+                "end_time_s": [1.02, 1.04, 1.06, 1.08],
+                "true_arm": [0, 0, 1, 1],
+                "predicted_arm": [0] * 4,
+                "n_spikes": [0, 1, 1, 1],
+                "arm0_mass": [0.6] * 4,
+                "arm1_mass": [0.3] * 4,
+            }
+        )
+        windows.to_csv(out / "checkpoints" / (session + "_windows.csv"), index=False)
+    for name, frame in [
+        ("trial_inventory", trials),
+        ("decoder_audit", pd.DataFrame(qc)),
+        ("input_inventory", pd.DataFrame(columns=["path", "sha256"])),
+        ("by_animal", pd.DataFrame([{"animal": "a", "transitions": 0, "corrections": 0, "repetitions": 0, "recording_days": 0, "animal_supported": False}])),
+        ("gate_summary", pd.DataFrame([{"observed": 0, "passed": False}] * 4)),
+    ]:
+        frame.to_csv(out / (prefix + name + ".csv"), index=False)
+    manifest = {
+        "protocol": P,
+        "source_directory": str(audit),
+        "source_manifest_sha256": file_sha256(audit / (prefix + "manifest.json")),
+        "feasibility_passed": False,
+        "calibration_passed": False,
+        "biological_status": "not_tested",
+        "output_sha256": {f.name: file_sha256(f) for f in out.glob("*.csv")},
+        "checkpoint_sha256": {f.name: file_sha256(f) for f in (out / "checkpoints").glob("*.csv")},
+    }
+    (out / (prefix + "manifest.json")).write_text(json.dumps(manifest))
+    return out
+
+
+def test_independent_readout_verifier_recomputes_accuracy(tmp_path):
+    out = verification_fixture(tmp_path)
+    result = verify_readout(out, out / "verification.json")
+    assert result["status"] == "verified" and result["n_validation_windows"] == 8
+    assert result["n_passing_epochs"] == result["n_primary_transitions"] == 0
+
+
+def test_verifier_detects_metric_error_even_with_updated_file_hash(tmp_path):
+    out = verification_fixture(tmp_path)
+    path = out / "denovellis_post_error_decoder_audit.csv"
+    metrics = pd.read_csv(path)
+    metrics.loc[0, "arm0_recall"] = 0.99
+    metrics.to_csv(path, index=False)
+    manifest_path = out / "denovellis_post_error_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["output_sha256"][path.name] = file_sha256(path)
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(AssertionError, match="arm0_recall"):
+        verify_readout(out, out / "verification.json")

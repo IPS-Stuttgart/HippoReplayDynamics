@@ -58,6 +58,8 @@ def verify(root, dataset_root, output):
     manifest_path = root / (PREFIX + "manifest.json")
     manifest = json.loads(manifest_path.read_text())
     p = manifest["protocol"]
+    if p["protocol_version"] == "2.0" and manifest["stage"] == "feasibility":
+        return verify_readout(root, output)
     if p["protocol_version"] != "2.0" or manifest["stage"] != "audit":
         raise ValueError("This verifier only checks the v2 temporal audit")
     checks = []
@@ -147,6 +149,107 @@ def verify(root, dataset_root, output):
         "n_reconstructed_final_third_transitions": len(eligible),
         "n_primary_upper_bound": len(primary),
         "biological_association_tested": False,
+        "checks": checks,
+    }
+    atomic_json(output, result)
+    return result
+
+
+def verify_readout(root, output):
+    manifest_path = root / (PREFIX + "manifest.json")
+    manifest = json.loads(manifest_path.read_text())
+    p = manifest["protocol"]
+    checks = []
+
+    def require(name, passed):
+        checks.append({"check": name, "passed": bool(passed)})
+        if not passed:
+            raise AssertionError(name)
+
+    for name, digest in manifest["output_sha256"].items():
+        require("output:" + name, Path(name).name == name and file_sha256(root / name) == digest)
+    for name, digest in manifest["checkpoint_sha256"].items():
+        require("checkpoint:" + name, Path(name).name == name and file_sha256(root / "checkpoints" / name) == digest)
+    source = Path(manifest["source_directory"])
+    require("audit_manifest", file_sha256(source / (PREFIX + "manifest.json")) == manifest["source_manifest_sha256"])
+    audit = json.loads((source / (PREFIX + "manifest.json")).read_text())
+    require("same_protocol_and_passed_audit", audit["protocol"] == p and audit["audit_passed"])
+    for name, digest in audit["output_sha256"].items():
+        require("audit_output:" + name, file_sha256(source / name) == digest)
+    inputs = pd.read_csv(root / (PREFIX + "input_inventory.csv"))
+    for row in inputs.dropna(subset=["sha256"]).drop_duplicates("path").itertuples():
+        require("input:" + row.path, file_sha256(row.path) == row.sha256)
+    trials = pd.read_csv(root / (PREFIX + "trial_inventory.csv"))
+    qc = pd.read_csv(root / (PREFIX + "decoder_audit.csv"))
+    require("every_target_epoch_evaluated", set(qc.session) == set(trials.loc[trials.final_third_eligible, "session"]) and not qc.session.duplicated().any())
+    recomputed_pass = {}
+    total_windows = 0
+    for row in qc.to_dict("records"):
+        session = row["session"]
+        windows = pd.read_csv(root / "checkpoints" / (session + "_windows.csv"))
+        require(session + ":status", row["status"] in {"passed", "failed_accuracy", "unavailable"})
+        passed = False
+        if row["status"] == "unavailable":
+            require(session + ":missing_not_zero", len(windows) == 0 and bool(row["reason"]))
+        else:
+            total_windows += len(windows)
+            recalls = []
+            for arm in (0, 1):
+                selected = windows.loc[windows.true_arm == arm]
+                require(session + f":arm{arm}_support", len(selected) > 0)
+                value = float((selected.predicted_arm == arm).sum() / len(selected))
+                recalls.append(value)
+                require(session + f":arm{arm}_recall", np.isclose(value, row[f"arm{arm}_recall"], rtol=0, atol=1e-12))
+            balanced = sum(recalls) / 2
+            passed = balanced >= p["min_run_balanced_accuracy"] and min(recalls) >= p["min_run_arm_recall"]
+            require(session + ":balanced_accuracy", np.isclose(balanced, row["balanced_accuracy"], rtol=0, atol=1e-12))
+            require(session + ":bin_count", len(windows) == row["n_arm_windows"])
+            require(session + ":silent_bins", int((windows.n_spikes == 0).sum()) == row["zero_spike_windows"])
+            require(session + ":middle_only", bool((windows.start_time_s >= row["train_end_s"]).all() and (windows.end_time_s <= row["validation_end_s"]).all()))
+            require(
+                session + ":nonoverlapping",
+                not windows.start_time_s.duplicated().any() and np.all(windows.start_time_s.to_numpy()[1:] >= windows.end_time_s.to_numpy()[:-1] - 1e-9),
+            )
+            require(session + ":twenty_ms", np.allclose(windows.end_time_s - windows.start_time_s, 0.020, rtol=0, atol=1e-9))
+            require(session + ":posterior_arm_choice", np.array_equal((windows.arm1_mass > windows.arm0_mass).astype(int), windows.predicted_arm))
+        recomputed_pass[session] = passed
+        require(session + ":threshold_decision", passed == row["decoder_qc_passed"])
+    eligible = trials.final_third_eligible & trials.session.map(recomputed_pass).fillna(False).astype(bool)
+    require("trial_decoder_qualification", eligible.equals(trials.decoder_qualified_transition))
+    by_animal = pd.read_csv(root / (PREFIX + "by_animal.csv"))
+    retained = []
+    for row in by_animal.itertuples():
+        group = trials.loc[eligible & trials.animal.eq(row.animal)]
+        corrected, repeated = int(group.next_outcome.eq("correction").sum()), int(group.next_outcome.eq("repeated_error").sum())
+        supported = corrected > 0 and repeated > 0 and group.day.nunique() >= p["min_recording_days_per_animal"]
+        require(
+            row.animal + ":cohort",
+            (len(group), corrected, repeated, group.day.nunique(), supported) == (row.transitions, row.corrections, row.repetitions, row.recording_days, row.animal_supported),
+        )
+        if supported:
+            retained.append(row.animal)
+    primary = eligible & trials.animal.isin(retained)
+    require("primary_trial_qualification", primary.equals(trials.primary_cohort_eligible))
+    selected = trials.loc[primary]
+    counts = [len(retained), len(selected), int(selected.next_outcome.eq("correction").sum()), int(selected.next_outcome.eq("repeated_error").sum())]
+    floors = [p["min_animals"], p["min_transitions"], p["min_corrections"], p["min_repeated_errors"]]
+    gates = pd.read_csv(root / (PREFIX + "gate_summary.csv"))
+    for i, (count, floor) in enumerate(zip(counts, floors, strict=True)):
+        require(f"gate:{i}", int(gates.iloc[i].observed) == count and bool(gates.iloc[i].passed) == (count >= floor))
+    require("overall", manifest["feasibility_passed"] == all(c >= f for c, f in zip(counts, floors, strict=True)))
+    require("biology_not_tested", manifest["biological_status"] == "not_tested" and not manifest["calibration_passed"])
+    result = {
+        "status": "verified",
+        "completed_at_utc": datetime.now(UTC).isoformat(),
+        "n_checks": len(checks),
+        "n_evaluated_epochs": len(qc),
+        "n_validation_windows": total_windows,
+        "n_passing_epochs": sum(recomputed_pass.values()),
+        "n_decoder_qualified_transitions": int(eligible.sum()),
+        "n_primary_transitions": int(primary.sum()),
+        "biological_association_tested": False,
+        "scope": "Independent per-bin confusion counts, frozen thresholds, chronology, cohort/gate accounting and hashes; not an independent raw decoder refit",
+        "provenance": build_script_provenance(input_paths={"manifest": manifest_path}, cwd=Path(__file__).resolve().parents[1]),
         "checks": checks,
     }
     atomic_json(output, result)

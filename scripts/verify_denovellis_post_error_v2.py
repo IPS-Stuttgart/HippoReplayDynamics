@@ -23,7 +23,7 @@ except ModuleNotFoundError:
 
 def independent_trials(time, xy, speed, wells, center, outers, p):
     packet = {"figure_data": {"time": np.asarray(time).tolist(), "xy": np.asarray(xy).tolist()}, "geometry": {"wells": np.asarray(wells).tolist()}}
-    visits = position_visits(packet, p)
+    visits = [{**v, "visit_index": i + 1} for i, v in enumerate(position_visits(packet, p))]
     t = np.asarray(time)
     lower = (t[0] + 2 * t[-1]) / 3
     rows = []

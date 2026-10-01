@@ -140,7 +140,8 @@ def test_independent_raw_trial_reconstruction(tracking_gap, immobile_speed):
     intervals = valid_intervals(t, near & (speed < 4), 0.25)
     legacy = build_transitions(visits, center=1, outers=(2, 3), immobile_intervals=intervals, min_exposure=0.5, max_window=10)
     actual = [restrict_transition(r, visits, [0, 30, 60, 90]) for r in legacy]
-    independent, _ = independent_trials(t, xy, speed, wells, 1, (2, 3), P)
+    independent, verified_visits = independent_trials(t, xy, speed, wells, 1, (2, 3), P)
+    assert [v["visit_index"] for v in verified_visits] == list(range(1, len(verified_visits) + 1))
     assert len(actual) == len(independent) == (1 if tracking_gap else 2)
     for a, b in zip(actual, independent, strict=True):
         assert a["final_third_eligible"] == b["eligible"]

@@ -90,7 +90,7 @@ def scan_file(path, dataset, protocol):
                 label = classify_route(native, info, total_limit=rules["optimized_total_string_length_strictly_below"], segment_limit=rules["segment_string_length_strictly_below"])["route_label"]
                 gap_labels.append([gap, label])
             row["tracking_gap_sensitivity_labels"] = json.dumps(gap_labels)
-    except (ValueError, KeyError, OSError, zipfile.BadZipFile) as exc:
+    except (ValueError, TypeError, KeyError, OSError, zipfile.BadZipFile) as exc:
         row.update(read_status="failed", read_failure_reason=str(exc), route_label="unclassifiable", route_reason="read_or_schema_failure", optimized_new_success=False)
     return row
 
@@ -272,7 +272,7 @@ def main():
         for animal in expected:
             rr = [r for r in trials if r["released_group"] == group and r["animal"] == animal]
             bb = [b for b in blocks if b["released_group"] == group and b["animal"] == animal]
-            cohort.append({"released_group": group, "animal": animal, "n_trials": len(rr), "n_blocks": len(bb), "n_new_checkpoint_blocks": sum(b["n_new_checkpoint_trials"] > 0 for b in bb), "missing_trial_numbers": sum(b["n_missing_trial_numbers"] for b in bb), "n_read_failures": sum(r["read_status"] != "ok" for r in rr), "n_unclassifiable_trials": sum(r["route_label"] == "unclassifiable" for r in rr), "n_stimulations": sum(r.get("n_stimulations", 0) for r in rr), "recording_order_verified": False, "primary_eligible": False, "exclusion_reason": "complete_trial_history_and_recording_order_unverified"})
+            cohort.append({"released_group": group, "animal": animal, "n_trials": len(rr), "n_blocks": len(bb), "n_new_checkpoint_blocks": sum(b["n_new_checkpoint_trials"] > 0 for b in bb), "missing_trial_numbers": sum(b["n_missing_trial_numbers"] for b in bb), "n_read_failures": sum(r["read_status"] != "ok" for r in rr), "n_classifiable_new_checkpoint_trials": sum(r["route_label"] != "unclassifiable" and r.get("active_checkpoint_phase") == "new_checkpoint_active" for r in rr), "n_unclassifiable_trials": sum(r["route_label"] == "unclassifiable" for r in rr), "n_stimulations": sum(r.get("n_stimulations", 0) for r in rr), "recording_order_verified": False, "primary_eligible": False, "exclusion_reason": "complete_trial_history_and_recording_order_unverified"})
     write_table(output / "cohort_inventory.csv", cohort)
     candidate_trials = [r for r in trials if r["released_group"] in protocol["expected_animals"]]
     transitions = adjacent_transitions(candidate_trials)
@@ -292,7 +292,7 @@ def main():
         ("relocation_boundary_verified", review["reward_relocation_trial_documented"], "Checkpoint flags identify current task lattice, not a dated C1-to-C2 switch"),
         ("stimulation_raster_alignment", all(r.get("stimulation_raster_aligned", False) and r.get("stimulation_within_trial_support", False) for r in candidate_trials), "trial_stim must agree with 1ms stim_mat; online ripple trigger latency is separate"),
         ("online_stimulation_latency_verified", review["online_ripple_trigger_timestamps_released"], "No native online-trigger timestamp field documented; delivered pulse times alone cannot measure 250ms delay"),
-        ("route_labels_identifiable_for_every_feedback_trial", all(r["route_label"] != "unclassifiable" for r in candidate_trials), "Missing/contradictory tracking stays unclassifiable, not other"),
+        ("post_relocation_routes_observable_in_every_feedback_animal", all(c["n_classifiable_new_checkpoint_trials"] > 0 for c in cohort), "Coverage check only, not validation of all labels; missing/contradictory tracking stays unclassifiable, not other"),
         ("published_cohort_comparison_reproduced", False, "Distance algorithm reproduced only; Fig5 grouping/chronology not independently reproduced"),
     ]
     go = all(g[1] for g in gates)

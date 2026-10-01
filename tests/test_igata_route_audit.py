@@ -1,4 +1,6 @@
 import json
+import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +10,9 @@ from scripts.audit_igata_obsolete_route_relapse import block_inventory, duplicat
 from scripts.igata_route_audit import adjacent_transitions, classify_route, field_string, file_identity, grid_labels, inspect_log, modified_levenshtein, stimulation_alignment
 from scripts.verify_igata_route_audit import reference_distance
 from scripts.launch_igata_route_audit import ALLOWED_HOSTS
+from scripts import audit_igata_obsolete_route_relapse as driver
+from scripts._provenance import file_sha256
+from scripts.verify_igata_route_audit import verify
 
 
 def good_info():
@@ -170,3 +175,65 @@ def test_return_records_use_release_return_filename_pattern(tmp_path):
 def test_launcher_accepts_verified_server_hostname_not_unrelated_hosts():
     assert ALLOWED_HOSTS == {"gpuserver6000", "workstation2"}
     assert "gpuserver4090" not in ALLOWED_HOSTS
+
+
+def save_valid_trial(dataset):
+    path = dataset / "Disrupted/rat6/trial_data/190101_detourG01_trial001.npz"
+    path.parent.mkdir(parents=True)
+    letters = "lUVQLGBCDEa"
+    xy = []
+    for letter in letters:
+        if letter in "la":
+            xy.extend([[-100, 800] if letter == "l" else [1100, 100]] * 3)
+        else:
+            n = ord(letter) - 65
+            xy.extend([[100 + n % 5 * 200, 100 + n // 5 * 200]] * 3)
+    log = np.zeros((len(xy), 16))
+    log[:, 0] = np.arange(len(xy)) * 40
+    log[:, 1:3] = xy
+    log[:, 3] = 1
+    log[15:, 8] = 1
+    log[-3:, 10] = 1
+    raster = np.zeros(len(log) * 40)
+    raster[[10, 200]] = 1
+    np.savez(path, log=log, locus_string_list=np.array(list(letters)), locus_stay_frame_list=np.full(len(letters), 3), spike_hist=np.zeros((0, len(raster))), lfp=np.zeros(len(raster) * 2), stim_mat=raster, trial_stim=np.array([10.2, 200.8]))
+    return path
+
+
+def test_valid_release_fixture_scans_and_labels_new_route(tmp_path):
+    path = save_valid_trial(tmp_path)
+    protocol = json.loads((Path(__file__).parents[1] / "docs/igata_obsolete_route_protocol.json").read_text())
+    row = scan_file(path, tmp_path, protocol)
+    assert row["read_status"] == "ok", row
+    assert row["native_string_matches_full_coordinates"] and row["native_dwell_covers_log"]
+    assert row["route_label"] == "new" and row["optimized_new_success"]
+    assert row["stimulation_raster_aligned"]
+
+
+def test_full_audit_stop_and_independent_verifier(tmp_path, monkeypatch):
+    dataset, out = tmp_path / "dataset", tmp_path / "output"
+    trial_path = save_valid_trial(dataset)
+    archive = tmp_path / "release.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.write(trial_path, trial_path.relative_to(dataset).as_posix())
+    readme, geometry = dataset / "readme.txt", dataset / "virtual_maze_field.py"
+    xml, pdf, txt = (tmp_path / name for name in ("main.xml", "si.pdf", "si.txt"))
+    for path in (readme, geometry, xml, pdf, txt):
+        path.write_text("synthetic source fixture")
+    protocol = json.loads((Path(__file__).parents[1] / "docs/igata_obsolete_route_protocol.json").read_text())
+    for key, path in (("release_readme_sha256", readme), ("release_geometry_sha256", geometry), ("supplement_pdf_sha256", pdf), ("supplement_text_sha256", txt)):
+        protocol[key] = file_sha256(path)
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(protocol))
+    monkeypatch.setattr(sys, "argv", ["audit", "--dataset-root", str(dataset), "--archive", str(archive), "--source-main-xml", str(xml), "--source-si-pdf", str(pdf), "--source-si-text", str(txt), "--protocol", str(protocol_path), "--output-dir", str(out)])
+    original = driver.build_script_provenance
+    monkeypatch.setattr(driver, "build_script_provenance", lambda **kwargs: dict(original(**kwargs), git_dirty=False))
+    driver.main()
+    decision = json.loads((out / "decision.json").read_text())
+    assert decision["decision"] == "stop_unverified_public_trial_design"
+    assert decision["validation_replicates_run"] == 0 and not decision["biological_contrast_run"]
+    result = verify(out, dataset)
+    assert result["overall"] == "pass", result
+    (out / "decision.json").write_text("{}")
+    with pytest.raises(KeyError):
+        verify(out, dataset)  # cannot bless a tampered or incomplete decision

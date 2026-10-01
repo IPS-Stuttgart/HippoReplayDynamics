@@ -395,12 +395,14 @@ def calibration(args, p):
     encoder_cache = {}
     epochs = selected[["animal", "day", "epoch", "session"]].drop_duplicates().sort_values(["animal", "day", "epoch"])
     for key in epochs.itertuples(index=False):
+        previous_input_count = len(files)
         path = checkpoints / (key.session + ".json")
         if path.exists():
             saved = json.loads(path.read_text())
             if saved["checkpoint_identity"] != checkpoint_identity:
                 raise ValueError("Calibration checkpoint differs; use a new output directory")
             row = saved["row"]
+            files.extend(saved["inputs"])
         else:
             row = dict(animal=key.animal, day=int(key.day), epoch=int(key.epoch), session=key.session, status="unresolved", preceding_run_epoch=None,
                        decoder_qc_passed=False, failure_reason="", balanced_accuracy=None, arm0_recall=None, arm1_recall=None)
@@ -411,6 +413,8 @@ def calibration(args, p):
                 if previous is None:
                     row.update(status="no_preceding_same_day_run", failure_reason="No same-day preceding RUN; no cross-day map substitution")
                 else:
+                    for source in (folder/f"{key.animal}tetinfo.mat", folder/f"{key.animal}task{key.day:02d}.mat"):
+                        files.append({"path": str(source), "size_bytes": source.stat().st_size, "sha256": file_sha256(source), "role": "readout_metadata"})
                     encoder_key = (key.animal, int(key.day), previous)
                     if encoder_key in encoder_cache:
                         qc, n_tetrodes, n_marks = encoder_cache[encoder_key]
@@ -432,7 +436,7 @@ def calibration(args, p):
                                status="pass" if passed else "failed_arm_identity", failure_reason="" if passed else "Frozen RUN arm accuracy/recall threshold not met")
             except (ValueError, OSError, KeyError, TypeError, IndexError) as exc:
                 row["failure_reason"] = f"{type(exc).__name__}: {exc}"
-            atomic_json(path, {"checkpoint_identity": checkpoint_identity, "row": row})
+            atomic_json(path, {"checkpoint_identity": checkpoint_identity, "row": row, "inputs": files[previous_input_count:]})
         results.append(row)
         print(json.dumps(row), flush=True)
         atomic_json(out / "progress.json", {"stage": "calibration", "phase": "chronological_run_arm_validation", "completed_epochs": len(results), "total_epochs": len(epochs)})
@@ -457,6 +461,7 @@ def calibration(args, p):
     csv(out, "input_inventory", files)
     atomic_json(out / (PREFIX + "manifest.json"), {"created_at_utc": datetime.now(UTC).isoformat(), "stage": "calibration", "protocol": p,
                 "provenance": provenance, "feasibility_passed": True, "calibration_passed": False, "readout_passed": readout_passed,
+                "environment": {"python": platform.python_version(), **{k: importlib.metadata.version(k) for k in ("numpy", "scipy", "pandas")}},
                 "biological_status": "not_tested", "final_status": "inconclusive", "next_action": "complete_frozen_sequence_and_statistical_calibration" if readout_passed else "stop_failed_run_readout",
                 "readout": {"observation": "clusterless marked-point-process KDE", "prior": "uniform over occupancy-supported graph bins", "time_bin_s": p["time_bin_s"], "graph_bin_cm": p["graph_bin_cm"],
                             "mark_features": "four named channel maxima; never stored X/Y", "mark_sigma_native_units": 24., "graph_spatial_sigma_cm": 6., "gaussian_mark_neighbor_radius_sigma": 6.,

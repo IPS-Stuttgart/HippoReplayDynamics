@@ -7,7 +7,7 @@ import pytest
 
 from scripts.analyze_denovellis_post_error_content import gates_for, main, marks_for_day, native_events
 from scripts.denovellis_post_error_core import (
-    build_transitions, contains_event, fit_predictive, near_well_labels,
+    build_transitions, contains_event, day_epochs, fit_predictive, near_well_labels,
     normalize_likelihood, reconstruct_visits, route_content, score_visits,
     sequence_test, valid_intervals, weighted_correlation, wilson_upper,
 )
@@ -27,6 +27,15 @@ def test_all_visits_update_task_rule():
     assert v[2]["task_correct"] is False
     assert v[3]["task_kind"] == "inbound" and v[3]["task_correct"] is False
     assert v[5]["required_well"] == 2 and v[5]["task_correct"] is True
+
+
+def test_numpy_data_attribute_is_not_matlab_epoch_metadata():
+    a = np.empty(3, object)
+    a[0] = np.array([])
+    a[1] = np.array([])
+    a[2] = np.array([{}, {"type": "run"}], object)
+    assert day_epochs(a, 3)[1]["type"] == "run"
+    assert day_epochs(a[2], 3)[1]["type"] == "run"
 
 
 def test_post_error_correction_and_repeat_chronology():

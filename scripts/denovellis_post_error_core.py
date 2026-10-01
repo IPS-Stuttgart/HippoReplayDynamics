@@ -11,6 +11,8 @@ from scipy.stats import norm
 
 
 def field(x, key, default=None):
+    if isinstance(x, np.ndarray):
+        return default
     return x.get(key, default) if isinstance(x, dict) else getattr(x, key, default)
 
 

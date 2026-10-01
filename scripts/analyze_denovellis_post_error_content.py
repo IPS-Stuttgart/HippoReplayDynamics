@@ -105,7 +105,8 @@ def marks_for_day(folder, day):
 
 
 def epoch_data(folder, day, epoch, p):
-    paths = {k: unique_file(folder, f"*{k}{day:02d}.mat") for k in ("linpos", "pos", "task")}
+    animal = next(k for k, name in ANIMALS.items() if name == folder.name)
+    paths = {k: unique_file(folder, f"{animal}{k}{day:02d}.mat") for k in ("linpos", "pos", "task")}
     lin = mat_epoch(paths["linpos"], "linpos", day, epoch)
     pos = mat_epoch(paths["pos"], "pos", day, epoch)
     task = mat_epoch(paths["task"], "task", day, epoch)

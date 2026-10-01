@@ -158,11 +158,68 @@ def verify(root):
     return summary
 
 
+def verify_readout_stop(root):
+    """Independently verify thresholds and the best-case coverage bound, not KDE fits."""
+    manifest = json.loads((root / (PREFIX + "manifest.json")).read_text())
+    p = manifest["protocol"]
+    checks = []
+    def check(name, passed, detail):
+        checks.append(dict(check=name, passed=bool(passed), detail=str(detail)))
+    for name, expected in manifest["output_sha256"].items():
+        check("output_hash:" + name, digest(root / name) == expected, expected)
+    for key, path in manifest["provenance"]["input_file_paths"].items():
+        expected = manifest["provenance"]["input_file_sha256"].get(key)
+        if expected:
+            check("direct_input_hash:" + key, digest(path) == expected, expected)
+    source = pd.read_csv(manifest["provenance"]["input_file_paths"]["trial_inventory"])
+    source = source[source.eligible].set_index("trial_id").sort_index()
+    cohort = pd.read_csv(root / (PREFIX + "decoder_qualified_trial_inventory.csv")).set_index("trial_id").sort_index()
+    q = pd.read_csv(root / (PREFIX + "run_arm_validation.csv"))
+    gates = pd.read_csv(root / (PREFIX + "gate_summary.csv")).set_index("gate")
+    check("unique_readout_sessions", not q.session.duplicated().any(), len(q))
+    check("same_behavioral_cohort", source.index.equals(cohort.index) and source[["session", "animal", "next_outcome"]].equals(cohort[["session", "animal", "next_outcome"]]), len(source))
+    passed = ((q.balanced_accuracy >= p["min_run_balanced_accuracy"])
+              & (q.arm0_recall >= p["min_run_arm_recall"]) & (q.arm1_recall >= p["min_run_arm_recall"]))
+    check("independent_fixed_qc_thresholds", passed.equals(q.decoder_qc_passed), int(passed.sum()))
+    good = source.session.isin(set(q.loc[passed, "session"]))
+    evaluated = source.session.isin(set(q.session))
+    check("no_hidden_favorable_cohort_selection", np.array_equal(good, cohort.primary_cohort_eligible), int(good.sum()))
+    check("evaluation_accounting", np.array_equal(evaluated, cohort.readout_evaluated), int(evaluated.sum()))
+    actual, possible = source[good], source[good | ~evaluated]
+    observed = dict(animals=actual.animal.nunique(), transitions=len(actual), corrections=int(actual.next_outcome.eq("correction").sum()), repeated_errors=int(actual.next_outcome.eq("repeated_error").sum()))
+    upper = dict(animals=possible.animal.nunique(), transitions=len(possible), corrections=int(possible.next_outcome.eq("correction").sum()), repeated_errors=int(possible.next_outcome.eq("repeated_error").sum()))
+    for name, count in observed.items():
+        g = gates.loc["decoder_qualified_" + name]
+        minimum = p["min_" + name]
+        check("independent_gate:" + name, float(g.observed) == count and float(g.maximum_possible) == upper[name]
+              and bool(g.passed) == (count >= minimum) and bool(g.irrecoverable_failure) == (upper[name] < minimum),
+              f"observed={count}; upper_bound={upper[name]}; required={minimum}")
+    check("irrecoverable_failure_proven", any(upper[name] < p["min_" + name] for name in upper), upper)
+    check("planned_readout_accounting", manifest["n_planned_readouts"] == source.session.nunique() and manifest["n_evaluated_readouts"] == len(q), manifest["n_planned_readouts"])
+    check("no_false_completed_inventory", manifest["readout_inventory_complete"] == (set(q.session) == set(source.session)), manifest["readout_inventory_complete"])
+    check("no_biological_interpretation", manifest["biological_status"] == "not_tested" and manifest["final_status"] == "inconclusive" and not manifest["calibration_passed"], manifest["next_action"])
+    inputs = pd.read_csv(root / (PREFIX + "input_inventory.csv"))
+    check("no_conflicting_raw_input_hashes", inputs.groupby("path").sha256.nunique().max() == 1, len(inputs))
+    hashed = inputs[inputs.sha256.notna()].drop_duplicates("path")
+    for row in hashed.itertuples():
+        check("consumed_readout_input_hash:" + row.path, digest(row.path) == row.sha256, row.sha256)
+    summary = dict(verification_passed=all(x["passed"] for x in checks), n_checks=len(checks), failed_checks=[x for x in checks if not x["passed"]],
+                   independent_counts=observed, maximum_possible_counts=upper, n_consumed_inputs_rehashed=len(hashed),
+                   scope="readout threshold/cohort accounting and file hashes; not independent raw decoder refitting or biological model calculations",
+                   verifier_source_sha256=digest(Path(__file__)))
+    pd.DataFrame(checks).to_csv(root / (PREFIX + "verification_checks.csv"), index=False)
+    (root / (PREFIX + "verification.json")).write_text(json.dumps(summary, indent=2) + "\n")
+    print(json.dumps(summary, indent=2))
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    if not verify(args.output_dir)["verification_passed"]:
+    manifest = json.loads((args.output_dir / (PREFIX + "manifest.json")).read_text())
+    verifier = verify_readout_stop if manifest["stage"] == "calibration" else verify
+    if not verifier(args.output_dir)["verification_passed"]:
         raise SystemExit(1)
 
 

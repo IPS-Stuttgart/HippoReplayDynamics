@@ -33,6 +33,11 @@ then compare with released linear-distance/exit-enter annotations. Consecutive
 bouts at the same well are one visit unless tracking continuity is broken.
 Missing position or gaps >250 ms reset task history; do not bridge them.
 The first bout, not a later return to the same well, defines the analysis pause.
+The frozen eligibility rule requires at least 95% agreement of raw-position and
+released linear annotations at jointly near-well frames, aligned clocks, RUN
+metadata, native-event table epoch coverage, and marks/tetrode metadata. Every
+task-recorded RUN epoch is inventoried, including excluded epochs. An epoch
+absent from the native table is not silently treated as having zero ripples.
 Score each completed move using history that existed before its destination was
 visited. The next required outer arm is not inferred from the next actual choice.
 

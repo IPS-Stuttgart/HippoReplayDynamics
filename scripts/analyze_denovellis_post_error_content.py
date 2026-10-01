@@ -17,10 +17,10 @@ from scipy.io import loadmat
 
 try:
     from scripts._provenance import build_script_provenance, file_sha256
-    from scripts.denovellis_post_error_core import build_transitions, contains_event, day_epochs, field, near_well_labels, reconstruct_visits, score_visits, valid_intervals
+    from scripts.denovellis_post_error_core import build_transitions, contains_event, day_epochs, field, reconstruct_visits, score_visits, valid_intervals
 except ModuleNotFoundError:
     from _provenance import build_script_provenance, file_sha256
-    from denovellis_post_error_core import build_transitions, contains_event, day_epochs, field, near_well_labels, reconstruct_visits, score_visits, valid_intervals
+    from denovellis_post_error_core import build_transitions, contains_event, day_epochs, field, reconstruct_visits, score_visits, valid_intervals
 
 ROOT = Path(__file__).resolve().parents[1]
 ANIMALS = dict(bon="Bond", cha="Chapati", con="Conley", cor="Corriander", dav="Dave", dud="Dudley", egy="Egypt", fra="Frank", gov="Government", remy="Remy")

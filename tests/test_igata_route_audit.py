@@ -210,6 +210,19 @@ def test_valid_release_fixture_scans_and_labels_new_route(tmp_path):
     assert row["stimulation_raster_aligned"]
 
 
+def test_literal_grid_flicker_does_not_reject_published_processed_route(tmp_path):
+    path = save_valid_trial(tmp_path)
+    with np.load(path, allow_pickle=False) as d:
+        values = {k: d[k] for k in d.files}
+    values["log"][4, 1] = 201  # brief raw crossing before the released U-to-V segment boundary
+    np.savez(path, **values)
+    protocol = json.loads((Path(__file__).parents[1] / "docs/igata_obsolete_route_protocol.json").read_text())
+    row = scan_file(path, tmp_path, protocol)
+    assert not row["native_string_matches_full_coordinates"]
+    assert row["native_grid_processing_status"] == "source_string_differs_from_instantaneous_grid"
+    assert row["route_label"] == "new"
+
+
 def test_full_audit_stop_and_independent_verifier(tmp_path, monkeypatch):
     dataset, out = tmp_path / "dataset", tmp_path / "output"
     trial_path = save_valid_trial(dataset)

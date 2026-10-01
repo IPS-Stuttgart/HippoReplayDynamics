@@ -55,6 +55,12 @@ The maximum tracking gap is provisionally 250 ms; report 125/250/500 ms and
 common lattice shifts of -20/-10/0/+10/+20 mm as diagnostic sensitivities.
 These cutoffs are frozen before group contrasts, not claimed as author criteria.
 No native result is interpretable merely because these audit labels exist.
+The published processed `locus_string_list` is the primary audit representation.
+Exact agreement with an instantaneous raw-grid string is reported, not required:
+the raw conversion can add short boundary flickers/backtracks. The undocumented
+details of the source's string processing remain a limitation. Dwell-frame totals,
+documented task sensors, tracking gaps and source-defined endpoint order are
+checked separately. A raw-grid disagreement alone is not a tracking failure.
 
 ## Cohort and chronology
 

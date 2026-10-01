@@ -72,8 +72,11 @@ def scan_file(path, dataset, protocol):
             else:
                 row.update(n_stimulations=0, stimulation_raster_aligned=False, stimulation_clock="not_released", online_trigger_latency_verified=False)
             row.update(classify_route(native, row, total_limit=rules["optimized_total_string_length_strictly_below"], segment_limit=rules["segment_string_length_strictly_below"]))
-            if not row["native_dwell_covers_log"] or not row["native_string_matches_full_coordinates"]:
-                row.update(route_label="unclassifiable", route_reason="native_route_tracking_disagreement", optimized_new_success=False)
+            row["native_grid_processing_status"] = "matches_instantaneous_grid" if row["native_string_matches_full_coordinates"] else "source_string_differs_from_instantaneous_grid"
+            # The release's processed strings are the published route representation.
+            # Raw boundary flickers are a processing audit, not grounds to reject author strings.
+            if not row["native_dwell_covers_log"]:
+                row.update(route_label="unclassifiable", route_reason="native_dwell_tracking_length_conflict", optimized_new_success=False)
             sensitivity = []
             for offset in rules["boundary_sensitivity_offsets_mm"]:
                 labels = grid_labels(log[:, 1:3], offset)

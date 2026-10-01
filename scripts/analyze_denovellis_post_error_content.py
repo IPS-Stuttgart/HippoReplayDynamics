@@ -560,7 +560,7 @@ def calibration(args, p):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=["feasibility", "calibration", "analysis", "report"], required=True)
+    parser.add_argument("--stage", choices=["audit", "feasibility", "calibration", "analysis", "report"], required=True)
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--native-events", type=Path)
     parser.add_argument("--protocol", type=Path, default=ROOT / "docs" / "denovellis_post_error_protocol.json")
@@ -572,6 +572,14 @@ def main(argv=None):
     p = json.loads(args.protocol.read_text())
     if args.seed != p["seed"]:
         parser.error("Seed differs from frozen protocol")
+    if p.get("protocol_version") == "2.0":
+        try:
+            from scripts.denovellis_post_error_v2 import run
+        except ModuleNotFoundError:
+            from denovellis_post_error_v2 import run
+        return run(args, p)
+    if args.stage == "audit":
+        parser.error("The audit stage requires the separately registered v2 protocol")
     if args.stage == "report":
         report(args.output_dir)
         return

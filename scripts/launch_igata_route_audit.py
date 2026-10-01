@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ALLOWED_HOSTS = {"gpuserver6000", "workstation2"}  # Verified SSH alias and its OS hostname.
 
 
 def record(path, value):
@@ -25,7 +26,7 @@ def main():
     p.add_argument("--supervise", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("command", nargs=argparse.REMAINDER)
     a = p.parse_args()
-    if socket.gethostname().split(".")[0] != "gpuserver6000":
+    if socket.gethostname().split(".")[0] not in ALLOWED_HOSTS:
         raise SystemExit("This experiment is restricted to gpuserver6000.")
     if a.supervise:
         job = json.loads((a.job_dir / "job.json").read_text())
@@ -45,7 +46,7 @@ def main():
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     a.job_dir = a.job_dir.resolve()
     a.job_dir.mkdir(parents=True, exist_ok=False)
-    record(a.job_dir / "job.json", {"code_commit": commit, "command": [sys.executable, "-u", str(ROOT / "scripts" / command[0]), *command[1:]], "created_at_utc": datetime.now(UTC).isoformat()})
+    record(a.job_dir / "job.json", {"code_commit": commit, "ssh_alias": "gpuserver6000", "os_hostname": socket.gethostname(), "command": [sys.executable, "-u", str(ROOT / "scripts" / command[0]), *command[1:]], "created_at_utc": datetime.now(UTC).isoformat()})
     record(a.job_dir / "status.json", {"status": "launching"})
     with (a.job_dir / "job.log").open("ab", buffering=0) as log:
         proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--supervise", "--job-dir", str(a.job_dir)], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)

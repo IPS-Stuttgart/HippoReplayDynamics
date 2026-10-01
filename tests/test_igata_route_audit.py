@@ -7,6 +7,7 @@ import pytest
 from scripts.audit_igata_obsolete_route_relapse import block_inventory, duplicate_inventory, scan_file
 from scripts.igata_route_audit import adjacent_transitions, classify_route, field_string, file_identity, grid_labels, inspect_log, modified_levenshtein, stimulation_alignment
 from scripts.verify_igata_route_audit import reference_distance
+from scripts.launch_igata_route_audit import ALLOWED_HOSTS
 
 
 def good_info():
@@ -153,3 +154,8 @@ def test_bad_npz_remains_explicit(tmp_path):
     r = scan_file(path, tmp_path, protocol)
     assert r["read_status"] == "failed" and r["route_label"] == "unclassifiable"
     assert r["file_sha256"]
+
+
+def test_launcher_accepts_verified_server_hostname_not_unrelated_hosts():
+    assert ALLOWED_HOSTS == {"gpuserver6000", "workstation2"}
+    assert "gpuserver4090" not in ALLOWED_HOSTS

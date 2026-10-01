@@ -51,8 +51,8 @@ def main():
             raise
         return
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if not command or command[0] != "analyze_denovellis_post_error_content.py":
-        parser.error("Only the staged post-error entry point may run through this launcher")
+    if not command or command[0] not in {"analyze_denovellis_post_error_content.py", "audit_denovellis_run_readout.py"}:
+        parser.error("Only the staged post-error entry point or bounded RUN-only audit may run through this launcher")
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip():
         parser.error("Commit the isolated checkout before launching")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()

@@ -31,6 +31,12 @@ def acquire(args, protocol):
     if len(files) != 1:
         raise ValueError("--source-archive must name an actual file in the pinned Figshare version; newer releases are not substituted")
     entry = files[0]
+    if "source_published_md5" in protocol and (
+        entry["name"] != protocol["source_filename"]
+        or entry["computed_md5"] != protocol["source_published_md5"]
+        or entry["size"] != protocol["source_size_bytes"]
+    ):
+        raise ValueError("Published source metadata differs from the frozen source amendment")
     verified = download_verified(entry["download_url"], args.source_archive, entry["size"], entry["computed_md5"], "md5", protocol["download_reserve_bytes"])
     atomic_json(metadata_dir / "source_verified.json", verified)
     base = f"https://api.dandiarchive.org/api/dandisets/{protocol['dandi_id']}/versions/{protocol['dandi_version']}/"

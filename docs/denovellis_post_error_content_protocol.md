@@ -15,6 +15,19 @@ https://doi.org/10.7272/Q61N7ZC3 . The independently inspected author position
 loader uses stored position and speed directly, including smoothed columns when
 present; `cmperpixel` must not be applied again.
 
+Readout implementation, frozen before RUN validation: four named waveform maxima
+per metadata-verified CA1/CA2/CA3 tetrode; graph KDE spatial bandwidth 6 cm and
+mark bandwidth 24 native amplitude units, following the author's bandwidths.
+Gaussian mark neighbors within six bandwidths approximate the negligible tail;
+if no neighbor exists the entire training group is evaluated. No mark-position
+column is included. A same-day preceding RUN is mandatory (no cross-day map
+substitution); its initial 70% trains the arm check, its final 30% tests it.
+Both use >4 cm/s movement and the same independent 20-ms readout. Zero-spike
+RUN bins are not removed to inflate accuracy. Arm accuracy is measured on
+unique route portions, not the shared stem. All predetermined readouts must pass;
+failed sessions/animals are not replaced by favorable ones. The frozen minimum
+cohort counts must also hold with preceding RUN availability.
+
 Shin et al. (2019), https://doi.org/10.1016/j.neuron.2019.09.012 , analyzes
 past/future path prediction, learning stages, incorrect upcoming outbound choices,
 and coordinated CA1/PFC replay (Figs. 3, 5, S6 and replay-prediction methods).

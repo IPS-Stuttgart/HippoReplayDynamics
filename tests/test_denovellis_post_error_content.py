@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.io import savemat
 
 from scripts.analyze_denovellis_post_error_content import gates_for, main, marks_for_day, native_events
 from scripts.denovellis_post_error_core import (
@@ -11,6 +12,7 @@ from scripts.denovellis_post_error_core import (
     normalize_likelihood, reconstruct_visits, route_content, score_visits,
     sequence_test, valid_intervals, weighted_correlation, wilson_upper,
 )
+from scripts.denovellis_post_error_neural import event_seed, fit_encoding, make_graph, marked_file
 
 WELLS = np.array([[0, 0], [-40, 0], [40, 0]])
 PROTOCOL = json.loads((Path(__file__).parents[1] / "docs/denovellis_post_error_protocol.json").read_text())
@@ -166,6 +168,63 @@ def test_empty_feasibility_cannot_pass():
 
 def test_failed_prerequisite_blocks_analysis(tmp_path):
     (tmp_path / "denovellis_post_error_manifest.json").write_text(json.dumps({"protocol": PROTOCOL, "feasibility_passed": False}))
+    with pytest.raises(SystemExit) as exc:
+        main(["--stage", "analysis", "--prerequisite-dir", str(tmp_path), "--output-dir", str(tmp_path / "never")])
+    assert exc.value.code == 2
+    assert not (tmp_path / "never").exists()
+
+
+def graph_fixture():
+    coords = [[0, 0, 0, 50], [0, 50, -30, 50], [-30, 50, -30, 0], [0, 50, 30, 50], [30, 50, 30, 0]]
+    return make_graph(coords, [[0, 0], [-30, 0], [30, 0]], 1, (2, 3))
+
+
+def test_graph_branch_geometry_and_shared_stem():
+    graph = graph_fixture()
+    assert np.allclose(graph.distance, graph.distance.T)
+    assert np.allclose(np.diag(graph.distance), 0)
+    left, right = graph.unique_masks
+    assert not (left & right).any()
+    assert not left[graph.segment == 0].any()
+    i = np.flatnonzero(graph.segment == 2)[-1]
+    j = np.flatnonzero(graph.segment == 4)[-1]
+    assert graph.distance[i, j] > np.linalg.norm(graph.xy[i]-graph.xy[j])
+    assert all(np.diff(d).min() > 0 for _, d in graph.routes)
+
+
+def test_waveform_features_cannot_include_tracked_position(tmp_path):
+    path = tmp_path / "marks.mat"
+    savemat(path, {"filedata": {"params": [[10000, 1, 2, 3, 4, 1000, 2000], [20000, 4, 3, 2, 1, 999, 999]],
+                               "paramnames": ["Time", "Channel 1 Max", "Channel 2 Max", "Channel 3 Max", "Channel 4 Max", "X position", "Y position"]}})
+    t, f = marked_file(path)
+    np.testing.assert_allclose(t, [1, 2])
+    np.testing.assert_allclose(f, [[1, 2, 3, 4], [4, 3, 2, 1]])
+
+
+def test_graph_encoding_never_uses_future_marks():
+    graph = graph_fixture()
+    xy = np.tile(graph.xy, (4, 1))
+    t = np.arange(len(xy))*.02
+    speed = np.full(len(xy), 10.)
+    features = np.column_stack([xy, xy])
+    marktime = t+.001
+    marks = {1: (marktime, features.copy()), 2: (marktime, features.copy())}
+    cutoff = t[len(t)//2]
+    fitted = fit_encoding(graph, t, xy, speed, marks, start=0, end=cutoff)
+    changed = {k: (a, np.where((a >= cutoff)[:, None], b+10000, b)) for k, (a, b) in marks.items()}
+    refitted = fit_encoding(graph, t, xy, speed, changed, start=0, end=cutoff)
+    for k in fitted.features:
+        np.testing.assert_allclose(fitted.features[k], refitted.features[k])
+        np.testing.assert_allclose(fitted.rate[k], refitted.rate[k])
+
+
+def test_event_seed_is_stable_without_python_hash():
+    assert event_seed(20261001, "bon", 3, 2, 1) == event_seed(20261001, "bon", 3, 2, 1)
+    assert event_seed(20261001, "bon", 3, 2, 1) != event_seed(20261001, "bon", 3, 2, 2)
+
+
+def test_failed_calibration_blocks_biological_model(tmp_path):
+    (tmp_path / "denovellis_post_error_manifest.json").write_text(json.dumps({"protocol": PROTOCOL, "feasibility_passed": True, "calibration_passed": False}))
     with pytest.raises(SystemExit) as exc:
         main(["--stage", "analysis", "--prerequisite-dir", str(tmp_path), "--output-dir", str(tmp_path / "never")])
     assert exc.value.code == 2

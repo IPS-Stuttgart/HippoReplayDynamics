@@ -375,6 +375,97 @@ def report(out):
     (out / (PREFIX + "report.md")).write_text("\n".join(lines))
 
 
+def calibration(args, p):
+    try:
+        from scripts.denovellis_post_error_neural import fit_encoding, load_marks, make_graph, preceding_run, run_arm_qc
+    except ModuleNotFoundError:
+        from denovellis_post_error_neural import fit_encoding, load_marks, make_graph, preceding_run, run_arm_qc
+    out = args.output_dir
+    out.mkdir(parents=True, exist_ok=True)
+    prerequisites = args.prerequisite_dir
+    trials = pd.read_csv(prerequisites / (PREFIX + "trial_inventory.csv"))
+    selected = trials[trials.eligible].copy()
+    provenance = build_script_provenance(input_paths={"protocol": args.protocol, "feasibility_manifest": prerequisites / (PREFIX + "manifest.json"),
+                                                    "trial_inventory": prerequisites / (PREFIX + "trial_inventory.csv"), "dataset_root": args.dataset_root}, cwd=ROOT)
+    checkpoint_identity = {"code_commit": provenance["code_commit"], "trial_sha256": file_sha256(prerequisites / (PREFIX + "trial_inventory.csv")), "protocol_sha256": file_sha256(args.protocol)}
+    checkpoints = out / "checkpoints"
+    checkpoints.mkdir(exist_ok=True)
+    results = []
+    files = []
+    encoder_cache = {}
+    epochs = selected[["animal", "day", "epoch", "session"]].drop_duplicates().sort_values(["animal", "day", "epoch"])
+    for key in epochs.itertuples(index=False):
+        path = checkpoints / (key.session + ".json")
+        if path.exists():
+            saved = json.loads(path.read_text())
+            if saved["checkpoint_identity"] != checkpoint_identity:
+                raise ValueError("Calibration checkpoint differs; use a new output directory")
+            row = saved["row"]
+        else:
+            row = dict(animal=key.animal, day=int(key.day), epoch=int(key.epoch), session=key.session, status="unresolved", preceding_run_epoch=None,
+                       decoder_qc_passed=False, failure_reason="", balanced_accuracy=None, arm0_recall=None, arm1_recall=None)
+            folder = args.dataset_root / ANIMALS[key.animal]
+            try:
+                previous = preceding_run(folder, key.animal, int(key.day), int(key.epoch))
+                row["preceding_run_epoch"] = previous
+                if previous is None:
+                    row.update(status="no_preceding_same_day_run", failure_reason="No same-day preceding RUN; no cross-day map substitution")
+                else:
+                    encoder_key = (key.animal, int(key.day), previous)
+                    if encoder_key in encoder_cache:
+                        qc, n_tetrodes, n_marks = encoder_cache[encoder_key]
+                    else:
+                        time, xy, speed, wells, coords, center, outers, _, _, paths = epoch_data(folder, int(key.day), previous, p)
+                        graph = make_graph(coords, wells, center, outers, p["graph_bin_cm"])
+                        marks, sources = load_marks(folder, key.animal, int(key.day), previous, p["hippocampal_areas"])
+                        cutoff = float(time[0]+.7*(time[-1]-time[0]))
+                        encoding = fit_encoding(graph, time, xy, speed, marks, start=time[0], end=cutoff)
+                        qc = run_arm_qc(encoding, time, xy, speed, marks, start=cutoff, end=time[-1], dt=p["time_bin_s"])
+                        n_tetrodes = len(encoding.features)
+                        n_marks = sum(len(x) for x in encoding.features.values())
+                        encoder_cache[encoder_key] = (qc, n_tetrodes, n_marks)
+                        for source in [*sources, *paths.values(), folder/f"{key.animal}tetinfo.mat"]:
+                            files.append({"path": str(source), "size_bytes": source.stat().st_size, "sha256": file_sha256(source), "role": "readout_validation_input"})
+                    passed = (qc["balanced_accuracy"] is not None and qc["balanced_accuracy"] >= p["min_run_balanced_accuracy"]
+                              and min(qc["arm0_recall"], qc["arm1_recall"]) >= p["min_run_arm_recall"])
+                    row.update(qc, n_encoding_tetrodes=n_tetrodes, n_encoding_marks=n_marks, decoder_qc_passed=passed,
+                               status="pass" if passed else "failed_arm_identity", failure_reason="" if passed else "Frozen RUN arm accuracy/recall threshold not met")
+            except (ValueError, OSError, KeyError, TypeError, IndexError) as exc:
+                row["failure_reason"] = f"{type(exc).__name__}: {exc}"
+            atomic_json(path, {"checkpoint_identity": checkpoint_identity, "row": row})
+        results.append(row)
+        print(json.dumps(row), flush=True)
+        atomic_json(out / "progress.json", {"stage": "calibration", "phase": "chronological_run_arm_validation", "completed_epochs": len(results), "total_epochs": len(epochs)})
+        csv(out, "run_arm_validation", results)
+    qc = pd.DataFrame(results)
+    represented = qc[qc.preceding_run_epoch.notna()]
+    available_sessions = set(represented.session)
+    available_trials = selected[selected.session.isin(available_sessions)]
+    rows = [
+        ("preceding_run_animals", available_trials.animal.nunique() >= p["min_animals"], available_trials.animal.nunique(), p["min_animals"]),
+        ("preceding_run_transitions", len(available_trials) >= p["min_transitions"], len(available_trials), p["min_transitions"]),
+        ("preceding_run_corrections", (available_trials.next_outcome == "correction").sum() >= p["min_corrections"], int((available_trials.next_outcome == "correction").sum()), p["min_corrections"]),
+        ("preceding_run_repeated_errors", (available_trials.next_outcome == "repeated_error").sum() >= p["min_repeated_errors"], int((available_trials.next_outcome == "repeated_error").sum()), p["min_repeated_errors"]),
+        ("chronological_run_arm_identity", not represented.empty and represented.decoder_qc_passed.all(), int(represented.decoder_qc_passed.sum()), f"all {len(represented)} predetermined preceding RUN readouts meet balanced accuracy >=.80, each recall >=.75"),
+    ]
+    gates = [{"gate": k, "passed": bool(b), "observed": value, "criterion": criterion, "gate_type": "calibration"} for k, b, value, criterion in rows]
+    readout_passed = all(x["passed"] for x in gates)
+    for name in ("sequence_false_positive_calibration", "statistical_false_support_calibration"):
+        gates.append({"gate": name, "passed": False, "observed": "not_run", "criterion": "requires passed chronological RUN readout; 1000 frozen replicates per generator", "gate_type": "calibration"})
+    gates.append({"gate": "calibration_overall", "passed": False, "observed": "readout_validated" if readout_passed else "stopped_readout_validation", "criterion": "all readout, sequence and statistical prerequisites pass", "gate_type": "calibration"})
+    csv(out, "gate_summary", gates)
+    csv(out, "input_inventory", files)
+    atomic_json(out / (PREFIX + "manifest.json"), {"created_at_utc": datetime.now(UTC).isoformat(), "stage": "calibration", "protocol": p,
+                "provenance": provenance, "feasibility_passed": True, "calibration_passed": False, "readout_passed": readout_passed,
+                "biological_status": "not_tested", "final_status": "inconclusive", "next_action": "complete_frozen_sequence_and_statistical_calibration" if readout_passed else "stop_failed_run_readout",
+                "readout": {"observation": "clusterless marked-point-process KDE", "prior": "uniform over occupancy-supported graph bins", "time_bin_s": p["time_bin_s"], "graph_bin_cm": p["graph_bin_cm"],
+                            "mark_features": "four named channel maxima; never stored X/Y", "mark_sigma_native_units": 24., "graph_spatial_sigma_cm": 6., "gaussian_mark_neighbor_radius_sigma": 6.,
+                            "run_train_fraction": .7, "run_test_fraction": .3, "run_train_speed_cm_s": ">4", "run_test_speed_cm_s": ">4", "run_truth": "unique route portions; shared stem excluded",
+                            "neural_scope": "preceding RUN chronological validation only; replay events and outcome associations not decoded"},
+                "output_sha256": {v.name: file_sha256(v) for v in sorted(out.glob("*.csv"))}})
+    report(out)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=["feasibility", "calibration", "analysis", "report"], required=True)
@@ -401,6 +492,13 @@ def main(argv=None):
     prerequisite = json.loads((args.prerequisite_dir / (PREFIX + "manifest.json")).read_text())
     if prerequisite["protocol"] != p or not prerequisite.get("feasibility_passed", False):
         parser.error("Feasibility failed or protocol differs; downstream experiment is blocked")
+    if args.stage == "calibration":
+        if args.dataset_root is None:
+            parser.error("Calibration requires dataset root")
+        calibration(args, p)
+        return
+    if not prerequisite.get("calibration_passed", False):
+        parser.error("Calibration has not passed; biological association is blocked")
     parser.error("Actual preceding-RUN readout/calibration artifacts are required; downstream stages are not yet implemented. No biological scores were produced.")
 
 

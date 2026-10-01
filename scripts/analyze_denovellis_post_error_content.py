@@ -419,7 +419,12 @@ def calibration(args, p):
                     if encoder_key in encoder_cache:
                         qc, n_tetrodes, n_marks = encoder_cache[encoder_key]
                     else:
-                        time, xy, speed, wells, coords, center, outers, _, _, paths = epoch_data(folder, int(key.day), previous, p)
+                        time, xy, speed, wells, coords, center, outers, _, source_task, paths = epoch_data(folder, int(key.day), previous, p)
+                        _, _, _, target_wells, _, target_center, target_outers, _, target_task, target_paths = epoch_data(folder, int(key.day), int(key.epoch), p)
+                        source_environment = str(field(source_task, "environment", field(source_task, "description", "")))
+                        target_environment = str(field(target_task, "environment", field(target_task, "description", "")))
+                        if source_environment != target_environment or (center, outers) != (target_center, target_outers) or np.max(np.linalg.norm(wells-target_wells, axis=1)) > p["well_radius_cm"]:
+                            raise ValueError("Preceding RUN context/well identity does not match the target epoch")
                         graph = make_graph(coords, wells, center, outers, p["graph_bin_cm"])
                         marks, sources = load_marks(folder, key.animal, int(key.day), previous, p["hippocampal_areas"])
                         cutoff = float(time[0]+.7*(time[-1]-time[0]))
@@ -428,7 +433,7 @@ def calibration(args, p):
                         n_tetrodes = len(encoding.features)
                         n_marks = sum(len(x) for x in encoding.features.values())
                         encoder_cache[encoder_key] = (qc, n_tetrodes, n_marks)
-                        for source in [*sources, *paths.values(), folder/f"{key.animal}tetinfo.mat"]:
+                        for source in [*sources, *paths.values(), *target_paths.values(), folder/f"{key.animal}tetinfo.mat"]:
                             files.append({"path": str(source), "size_bytes": source.stat().st_size, "sha256": file_sha256(source), "role": "readout_validation_input"})
                     passed = (qc["balanced_accuracy"] is not None and qc["balanced_accuracy"] >= p["min_run_balanced_accuracy"]
                               and min(qc["arm0_recall"], qc["arm1_recall"]) >= p["min_run_arm_recall"])

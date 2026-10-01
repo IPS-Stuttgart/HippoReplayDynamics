@@ -22,6 +22,9 @@ Gaussian mark neighbors within six bandwidths approximate the negligible tail;
 if no neighbor exists the entire training group is evaluated. No mark-position
 column is included. A same-day preceding RUN is mandatory (no cross-day map
 substitution); its initial 70% trains the arm check, its final 30% tests it.
+Source and target must have matching environment and well identities, with well
+coordinates agreeing within the already frozen 10-cm well radius. Otherwise the
+encoder remains unavailable; no wrong-context substitution is made.
 Both use >4 cm/s movement and the same independent 20-ms readout. Zero-spike
 RUN bins are not removed to inflate accuracy. Arm accuracy is measured on
 unique route portions, not the shared stem. All predetermined readouts must pass;

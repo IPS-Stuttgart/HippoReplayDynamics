@@ -375,6 +375,97 @@ def report(out):
     (out / (PREFIX + "report.md")).write_text("\n".join(lines))
 
 
+def readout_cohort(trials, qc, p):
+    """All fixed-QC passing readouts count; failures do not veto other sessions."""
+    selected = trials[trials.eligible].copy()
+    if qc.session.duplicated().any() or not set(qc.session).issubset(set(selected.session)):
+        raise ValueError("Duplicate or noncohort readout sessions")
+    if qc.decoder_qc_passed.dtype != bool:
+        raise ValueError("Readout pass flags must be Boolean")
+    metric_pass = ((qc.balanced_accuracy >= p["min_run_balanced_accuracy"])
+                   & (qc.arm0_recall >= p["min_run_arm_recall"])
+                   & (qc.arm1_recall >= p["min_run_arm_recall"]))
+    if not np.array_equal(qc.decoder_qc_passed, metric_pass):
+        raise ValueError("Readout flags disagree with frozen numerical thresholds")
+    passed = set(qc.loc[metric_pass, "session"])
+    evaluated = set(qc.session)
+    selected["readout_status"] = selected.session.map(qc.set_index("session").status).fillna("not_evaluated")
+    selected["decoder_qc_passed"] = selected.session.isin(passed)
+    selected["readout_evaluated"] = selected.session.isin(evaluated)
+    selected["primary_cohort_eligible"] = selected.decoder_qc_passed
+    available = selected[selected.primary_cohort_eligible]
+    possible = selected[selected.primary_cohort_eligible | ~selected.readout_evaluated]
+    gates = []
+    for name, column, minimum in (("animals", None, "min_animals"), ("transitions", None, "min_transitions"),
+                                   ("corrections", "correction", "min_corrections"), ("repeated_errors", "repeated_error", "min_repeated_errors")):
+        def count(frame):
+            if name == "animals":
+                return frame.animal.nunique()
+            return len(frame) if column is None else int(frame.next_outcome.eq(column).sum())
+        observed, upper = count(available), count(possible)
+        gates.append({"gate": "decoder_qualified_" + name, "passed": observed >= p[minimum], "observed": observed,
+                      "maximum_possible": upper, "criterion": p[minimum], "gate_type": "calibration",
+                      "irrecoverable_failure": upper < p[minimum]})
+    complete = evaluated == set(selected.session)
+    return selected, gates, complete, any(g["irrecoverable_failure"] for g in gates)
+
+
+def finalize_readout(args, p):
+    """Finalize an incomplete readout only when an immutable coverage bound fails."""
+    source, out = args.readout_dir, args.output_dir
+    if source.resolve() == out.resolve():
+        raise ValueError("Finalization must not overwrite the original readout job")
+    trial_path = args.prerequisite_dir / (PREFIX + "trial_inventory.csv")
+    trials = pd.read_csv(trial_path)
+    rows, inputs, producers = [], [], set()
+    checkpoint_paths = sorted((source / "checkpoints").glob("*.json"))
+    if not checkpoint_paths:
+        raise ValueError("No actual committed readout checkpoints")
+    expected = {"trial_sha256": file_sha256(trial_path), "protocol_sha256": file_sha256(args.protocol)}
+    for path in checkpoint_paths:
+        saved = json.loads(path.read_text())
+        identity = saved["checkpoint_identity"]
+        if any(identity[k] != value for k, value in expected.items()):
+            raise ValueError("Readout checkpoints belong to different trials/protocol")
+        producers.add(identity["code_commit"])
+        rows.append(saved["row"])
+        inputs.extend(saved["inputs"])
+    if len(producers) != 1:
+        raise ValueError("Mixed readout producer commits")
+    qc = pd.DataFrame(rows)
+    cohort, gates, complete, impossible = readout_cohort(trials, qc, p)
+    if not impossible:
+        raise ValueError("Cannot terminate calibration without an irrecoverable frozen coverage failure")
+    out.mkdir(parents=True, exist_ok=False)
+    paths = {"protocol": args.protocol, "trial_inventory": trial_path,
+             "feasibility_manifest": args.prerequisite_dir / (PREFIX + "manifest.json"),
+             **{f"readout_checkpoint_{i}": path for i, path in enumerate(checkpoint_paths)}}
+    provenance = build_script_provenance(input_paths=paths, cwd=ROOT)
+    csv(out, "run_arm_validation", qc)
+    csv(out, "decoder_qualified_trial_inventory", cohort)
+    csv(out, "input_inventory", inputs)
+    for name in ("sequence_false_positive_calibration", "statistical_false_support_calibration"):
+        gates.append({"gate": name, "passed": False, "observed": "not_run_failed_coverage", "criterion": "requires adequate decoder-qualified cohort", "gate_type": "calibration"})
+    gates.append({"gate": "calibration_overall", "passed": False, "observed": "irrecoverable_decoder_qualified_coverage_failure", "criterion": "all calibration prerequisites pass", "gate_type": "calibration"})
+    csv(out, "gate_summary", gates)
+    by_animal = cohort.groupby("animal").agg(behavioral_transitions=("trial_id", "size"),
+                                            decoder_qualified_transitions=("primary_cohort_eligible", "sum"),
+                                            evaluated_transitions=("readout_evaluated", "sum"))
+    csv(out, "by_animal_readout_summary", by_animal.reset_index())
+    atomic_json(out / (PREFIX + "manifest.json"), {
+        "created_at_utc": datetime.now(UTC).isoformat(), "stage": "calibration", "protocol": p, "provenance": provenance,
+        "feasibility_passed": True, "calibration_passed": False, "readout_passed": False, "readout_inventory_complete": complete,
+        "readout_producer_commit": next(iter(producers)), "readout_source_directory": str(source.resolve()),
+        "n_evaluated_readouts": len(qc), "n_planned_readouts": cohort.session.nunique(),
+        "cohort_rule": "all readouts passing frozen >=.80 balanced accuracy and >=.75 per-arm recall; no outcome/content selection",
+        "rule_clarification": "Removed implementation-added all-sessions-must-pass veto; no numerical threshold changed, no replay content or association inspected",
+        "environment": {"python": platform.python_version(), **{k: importlib.metadata.version(k) for k in ("numpy", "scipy", "pandas")}},
+        "biological_status": "not_tested", "final_status": "inconclusive", "next_action": "stop_insufficient_decoder_qualified_coverage",
+        "stopping_proof": [g for g in gates if g.get("irrecoverable_failure")],
+        "output_sha256": {v.name: file_sha256(v) for v in sorted(out.glob("*.csv"))}})
+    report(out)
+
+
 def calibration(args, p):
     try:
         from scripts.denovellis_post_error_neural import fit_encoding, load_marks, make_graph, preceding_run, run_arm_qc
@@ -447,17 +538,8 @@ def calibration(args, p):
         atomic_json(out / "progress.json", {"stage": "calibration", "phase": "chronological_run_arm_validation", "completed_epochs": len(results), "total_epochs": len(epochs)})
         csv(out, "run_arm_validation", results)
     qc = pd.DataFrame(results)
-    represented = qc[qc.preceding_run_epoch.notna()]
-    available_sessions = set(represented.session)
-    available_trials = selected[selected.session.isin(available_sessions)]
-    rows = [
-        ("preceding_run_animals", available_trials.animal.nunique() >= p["min_animals"], available_trials.animal.nunique(), p["min_animals"]),
-        ("preceding_run_transitions", len(available_trials) >= p["min_transitions"], len(available_trials), p["min_transitions"]),
-        ("preceding_run_corrections", (available_trials.next_outcome == "correction").sum() >= p["min_corrections"], int((available_trials.next_outcome == "correction").sum()), p["min_corrections"]),
-        ("preceding_run_repeated_errors", (available_trials.next_outcome == "repeated_error").sum() >= p["min_repeated_errors"], int((available_trials.next_outcome == "repeated_error").sum()), p["min_repeated_errors"]),
-        ("chronological_run_arm_identity", not represented.empty and represented.decoder_qc_passed.all(), int(represented.decoder_qc_passed.sum()), f"all {len(represented)} predetermined preceding RUN readouts meet balanced accuracy >=.80, each recall >=.75"),
-    ]
-    gates = [{"gate": k, "passed": bool(b), "observed": value, "criterion": criterion, "gate_type": "calibration"} for k, b, value, criterion in rows]
+    cohort, gates, _, _ = readout_cohort(trials, qc, p)
+    csv(out, "decoder_qualified_trial_inventory", cohort)
     readout_passed = all(x["passed"] for x in gates)
     for name in ("sequence_false_positive_calibration", "statistical_false_support_calibration"):
         gates.append({"gate": name, "passed": False, "observed": "not_run", "criterion": "requires passed chronological RUN readout; 1000 frozen replicates per generator", "gate_type": "calibration"})
@@ -484,6 +566,7 @@ def main(argv=None):
     parser.add_argument("--protocol", type=Path, default=ROOT / "docs" / "denovellis_post_error_protocol.json")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--prerequisite-dir", type=Path)
+    parser.add_argument("--readout-dir", type=Path, help="Finalize actual readout checkpoints only if frozen cohort coverage cannot recover")
     parser.add_argument("--seed", type=int, default=20261001)
     args = parser.parse_args(argv)
     p = json.loads(args.protocol.read_text())
@@ -503,6 +586,9 @@ def main(argv=None):
     if prerequisite["protocol"] != p or not prerequisite.get("feasibility_passed", False):
         parser.error("Feasibility failed or protocol differs; downstream experiment is blocked")
     if args.stage == "calibration":
+        if args.readout_dir is not None:
+            finalize_readout(args, p)
+            return
         if args.dataset_root is None:
             parser.error("Calibration requires dataset root")
         calibration(args, p)

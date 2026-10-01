@@ -27,9 +27,19 @@ coordinates agreeing within the already frozen 10-cm well radius. Otherwise the
 encoder remains unavailable; no wrong-context substitution is made.
 Both use >4 cm/s movement and the same independent 20-ms readout. Zero-spike
 RUN bins are not removed to inflate accuracy. Arm accuracy is measured on
-unique route portions, not the shared stem. All predetermined readouts must pass;
-failed sessions/animals are not replaced by favorable ones. The frozen minimum
-cohort counts must also hold with preceding RUN availability.
+unique route portions, not the shared stem. The primary cohort includes every
+readout meeting the fixed .80 balanced-accuracy and .75 per-arm recall thresholds.
+Its frozen minimum counts must hold after readout QC. All failing and unavailable
+readouts remain inventoried; do not replace them with outcome-selected animals.
+
+Implementation clarification before replay decoding: an earlier runner added an
+extra all-sessions-must-pass veto. That is not the approved cohort rule and has
+been removed transparently. No numerical threshold, encoder rule or readout
+result was changed. Even if every not-yet-evaluated readout passed, the maximum
+possible cohort has fewer than the required five animals. This upper bound is a
+valid coverage stop without completing expensive readouts. It is not a negative
+content/outcome result, and does not establish that other validated encoders
+could not work on these recordings.
 
 Shin et al. (2019), https://doi.org/10.1016/j.neuron.2019.09.012 , analyzes
 past/future path prediction, learning stages, incorrect upcoming outbound choices,

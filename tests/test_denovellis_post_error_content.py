@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from scipy.io import savemat
 
-from scripts.analyze_denovellis_post_error_content import gates_for, main, marks_for_day, native_events
+from scripts.analyze_denovellis_post_error_content import gates_for, main, marks_for_day, native_events, readout_cohort
 from scripts.denovellis_post_error_core import (
     build_transitions, contains_event, day_epochs, fit_predictive, near_well_labels,
     normalize_likelihood, reconstruct_visits, route_content, score_visits,
@@ -258,3 +258,53 @@ def test_failed_calibration_blocks_biological_model(tmp_path):
         main(["--stage", "analysis", "--prerequisite-dir", str(tmp_path), "--output-dir", str(tmp_path / "never")])
     assert exc.value.code == 2
     assert not (tmp_path / "never").exists()
+
+
+def readout_fixture():
+    trials = pd.DataFrame([dict(animal=a, session=f"{a}-{i}", eligible=True, trial_id=f"{a}-{i}-{j}",
+                                next_outcome="correction" if j < 12 else "repeated_error")
+                           for a in "abcdef" for i in range(2) for j in range(20)])
+    qc = pd.DataFrame([dict(session=f"{a}-{i}", status="pass" if i == 0 else "failed_arm_identity",
+                            decoder_qc_passed=i == 0, balanced_accuracy=.90 if i == 0 else .70,
+                            arm0_recall=.90 if i == 0 else .70, arm1_recall=.90 if i == 0 else .70)
+                       for a in "abcdef" for i in range(2)])
+    return trials, qc
+
+
+def test_mixed_readouts_use_all_fixed_qc_passing_cohort():
+    trials, qc = readout_fixture()
+    cohort, gates, complete, impossible = readout_cohort(trials, qc, PROTOCOL)
+    assert complete and not impossible
+    assert all(g["passed"] for g in gates)
+    assert cohort.primary_cohort_eligible.sum() == 120
+    assert cohort[cohort.primary_cohort_eligible].animal.nunique() == 6
+    assert len(cohort) == 240
+
+
+def test_partial_readout_upper_bound_proves_five_animals_impossible():
+    trials, qc = readout_fixture()
+    qc = qc[qc.session.str[0].isin(list("abc"))].copy()
+    qc.loc[qc.session.str[0].isin(list("bc")), ["balanced_accuracy", "arm0_recall", "arm1_recall"]] = .70
+    qc.loc[qc.session.str[0].isin(list("bc")), "decoder_qc_passed"] = False
+    _, gates, complete, impossible = readout_cohort(trials, qc, PROTOCOL)
+    animals = next(g for g in gates if g["gate"] == "decoder_qualified_animals")
+    assert not complete and impossible
+    assert animals["observed"] == 1 and animals["maximum_possible"] == 4
+    assert animals["irrecoverable_failure"]
+
+
+def test_readout_cannot_impute_failed_metrics_or_duplicate_sessions():
+    trials, qc = readout_fixture()
+    qc.loc[0, "balanced_accuracy"] = np.nan
+    with pytest.raises(ValueError, match="numerical thresholds"):
+        readout_cohort(trials, qc, PROTOCOL)
+    _, qc = readout_fixture()
+    with pytest.raises(ValueError, match="Duplicate"):
+        readout_cohort(trials, pd.concat([qc, qc.iloc[:1]]), PROTOCOL)
+
+
+def test_recoverable_partial_readout_cannot_be_finalized(tmp_path):
+    trials, qc = readout_fixture()
+    _, gates, complete, impossible = readout_cohort(trials, qc.iloc[:2], PROTOCOL)
+    assert not complete and not impossible
+    assert next(g for g in gates if g["gate"] == "decoder_qualified_animals")["maximum_possible"] == 6

@@ -115,7 +115,7 @@ def test_silent_bins_retained_and_no_spurious_perfect_accuracy():
     graph, t, xy, speed, marks, p = fixture()
     encoding, _ = fit_variant(graph, t, xy, speed, marks, 0, 5, "frame_geodesic", p)
     silent = {tet: (np.array([]), np.empty((0, 4))) for tet in marks}
-    _, metric, confusion, *_ = decode_metrics(encoding, np.array([5., 5.1]), np.array([5.02, 5.12]), np.array([0, 1]), silent)
+    _, metric, confusion, *_ = decode_metrics(encoding, np.array([5., 6.]), np.array([5.125, 6.125]), np.array([0, 1]), silent)
     assert metric["zero_spike_windows"] == 2
     assert metric["balanced_accuracy"] == .5
     assert confusion.sum() == 2

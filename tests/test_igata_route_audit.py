@@ -133,6 +133,7 @@ def test_filename_identity_is_not_condition_inference():
     r = file_identity(Path("190712_detourG01_trial001.npz"))
     assert r == {"date": "190712", "recording_block": "detourG01", "trial_number": 1}
     assert "phase" not in r and "condition" not in r
+    assert file_identity(Path("190712_detourG01_return001.npz")) == r
     with pytest.raises(ValueError):
         file_identity(Path("arbitrary.npz"))
 
@@ -154,6 +155,16 @@ def test_bad_npz_remains_explicit(tmp_path):
     r = scan_file(path, tmp_path, protocol)
     assert r["read_status"] == "failed" and r["route_label"] == "unclassifiable"
     assert r["file_sha256"]
+
+
+def test_return_records_use_release_return_filename_pattern(tmp_path):
+    path = tmp_path / "Delayed/rat12/return_data/190712_detourG01_return001.npz"
+    path.parent.mkdir(parents=True)
+    np.savez(path, log=np.ones((2, 4)))
+    protocol = json.loads((Path(__file__).parents[1] / "docs/igata_obsolete_route_protocol.json").read_text())
+    row = scan_file(path, tmp_path, protocol)
+    assert row["record_kind"] == "return_data" and row["trial_number"] == 1
+    assert row["read_status"] == "failed"  # bad log, not a filename crash
 
 
 def test_launcher_accepts_verified_server_hostname_not_unrelated_hosts():

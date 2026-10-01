@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-FILE_PATTERN = re.compile(r"(?P<date>\d{6})_(?P<block>[^/]+)_trial(?P<trial>\d+)\.npz$")
+FILE_PATTERN = re.compile(r"(?P<date>\d{6})_(?P<block>[^/]+)_(?:trial|return)(?P<trial>\d+)\.npz$")
 SPECIAL = {"start": "U", "goal": "E", "old": "S", "new": "G"}
 
 

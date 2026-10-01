@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+import importlib.metadata
 import json
 from pathlib import Path
 import platform
@@ -66,9 +67,15 @@ def main():
     else:
         from scripts.odor_place_feasibility_core import dispatch
         result = dispatch(args, protocol)
+    environment = {}
+    for package in ["numpy", "scipy", "h5py", "matplotlib", "pytest"]:
+        try:
+            environment[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            environment[package] = "not_installed"
     atomic_json(args.output_dir / (PREFIX + args.stage.replace("-", "_") + "_manifest.json"), {
         **provenance, "created_at_utc": datetime.now(UTC).isoformat(), "stage": args.stage,
-        "protocol_sha256": digest(args.protocol), "python": platform.python_version(),
+        "protocol_sha256": digest(args.protocol), "python": platform.python_version(), "environment_versions": environment,
         "dataset_root": str(args.dataset_root.resolve()), "result": result,
         "association_fitted": False, "manuscript_claims_changed": False,
     })

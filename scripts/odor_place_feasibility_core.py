@@ -466,7 +466,7 @@ def diagnostic_figures(out, protocol):
     missing = []
     for animal in names:
         rows = [r for r in crosswalk if r["animal"] == animal]
-        errors = [r for r in trials if r["animal"] == animal and r["correct_choice_annotation"] == "0"]
+        errors = [r for r in trials if r["animal"] == animal and float(r["correct_choice_annotation"]) == 0]
         match.append(sum(r["clock_matched_within_5ms"] == "True" for r in rows) / len(rows) if rows else 0)
         missing.append(sum(not r["nwb_well_start_s"] for r in errors))
     axes[0].bar(names, match, color="#277c87")
@@ -491,7 +491,7 @@ def diagnostic_figures(out, protocol):
                 axis.plot(relative, xy[:, 0], label="source x", color="#277c87")
                 axis.plot(relative, xy[:, 1], label="source y", color="#79549b")
             for field, color in [("sniffend", "#be6256"), ("rewardstart", "#5a8e45"), ("rewardend", "#5a8e45")]:
-                if annotations[field] is not None:
+                if annotations.get(field) is not None:
                     axis.axvline(annotations[field] - annotations["sniffstart"], color=color, linestyle="--", alpha=.7, label=field)
             axis.set(title=f"{example['animal']} source day {example['source_day']}, error {example['source_trial_index']}: unresolved",
                      xlabel="Seconds from compiled source sniff onset", ylabel="Source coordinate (cm)")

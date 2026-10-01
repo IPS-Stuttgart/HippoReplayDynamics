@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from scripts.audit_odor_place_post_error_feasibility import acquire
-from scripts.odor_place_feasibility_core import blocked_run_qc, clean, inventory, read_table, source_inventory, unique_clock_matches, verify, write_table
+from scripts.odor_place_feasibility_core import blocked_run_qc, clean, inventory, read_table, report, source_inventory, unique_clock_matches, verify, write_table
 from scripts.odor_place_source_io import BoundedHTTPFile, atomic_json, check_space, digest, download_verified
 
 PROTOCOL = json.loads((Path(__file__).parents[1] / "docs/odor_place_post_error_protocol.json").read_text())
@@ -298,3 +298,20 @@ def test_cli_never_exposes_association_stage(tmp_path):
     import sys
     result = subprocess.run([sys.executable, "scripts/audit_odor_place_post_error_feasibility.py", "analysis"], capture_output=True, text=True)
     assert result.returncode == 2 and "invalid choice" in result.stderr
+
+
+def test_report_missing_well_boundaries_remain_unresolved(tmp_path):
+    args, reader = actual_pipeline_fixture(tmp_path)
+    with patch("scripts.odor_place_feasibility_core.BoundedHTTPFile", side_effect=reader):
+        inventory(args, PROTOCOL)
+    blocked_run_qc(args, PROTOCOL)
+    verify(args, PROTOCOL)
+    path = args.output_dir / "odor_place_post_error_unresolved_examples.json"
+    examples = json.loads(path.read_text())
+    del examples[0]["trial_annotations"]["rewardend"]
+    atomic_json(path, examples)
+    result = report(args, PROTOCOL)
+    assert result["status"] == "inconclusive_feasibility" and not result["ready_for_calibration"]
+    gates = read_table(args.output_dir, "gate_summary")
+    assert next(r for r in gates if r["gate"] == "ready_for_calibration")["passed"] == "False"
+    assert len(read_table(args.output_dir, "figure_manifest")) == 2

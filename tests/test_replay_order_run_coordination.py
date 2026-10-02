@@ -10,6 +10,8 @@ import pytest
 import h5py
 
 from scripts import audit_replay_order_run_coordination as audit
+from scripts import verify_replay_pair_measurements as verifier
+from scripts.verify_replay_pair_measurements import reference_order
 
 
 @pytest.fixture
@@ -41,6 +43,16 @@ def test_order_sign_and_reverse():
     assert original[0, 1] == 1
     np.testing.assert_array_equal(original, -original.T)
     np.testing.assert_allclose(audit.order_asymmetry(c[::-1], .005, .005, .06), -original)
+
+
+def test_independent_raw_pair_enumeration_matches_matrix_order():
+    c = np.random.default_rng(13).poisson(.7, (14, 6))
+    original = audit.order_asymmetry(c, .0047, .005, .06)
+    for i in range(6):
+        for j in range(i + 1, 6):
+            a = np.repeat(np.arange(len(c)), c[:, i])
+            b = np.repeat(np.arange(len(c)), c[:, j])
+            assert reference_order(a, b, .0047, .005, .06) == pytest.approx(original[i, j])
 
 
 def test_simultaneous_and_silent_cells_have_zero_direction():
@@ -199,3 +211,77 @@ def test_audit_cli_never_turns_empty_measurements_into_pass(protocol, monkeypatc
     with pytest.raises(ValueError, match="empty"):
         audit.main(["--dataset-root", str(tmp_path), "--protocol", str(path),
                     "--output-dir", str(tmp_path / "output")])
+
+
+@pytest.fixture
+def verified_fixture(protocol, monkeypatch, tmp_path):
+    p = {**protocol, "sessions": ["Rat1/Open1"], "minimum_eligible_units": 2,
+         "minimum_matched_run_exposure_s": .1, "candidate_min_active_units": 2,
+         "candidate_min_spikes": 2}
+    dataset = tmp_path / "dataset"
+    session_path = dataset / "Rat1/Open1"
+    session_path.mkdir(parents=True)
+    source = session_path / "Spike_Data.mat"
+    source.write_text("synthetic source identity")
+    session = synthetic_session()
+    monkeypatch.setattr(audit, "load_replay_session", lambda _: session)
+    monkeypatch.setattr(verifier, "load_replay_session", lambda _: session)
+    monkeypatch.setattr(audit, "variable_inventory", lambda _: [
+        {"path": str(source), "sha256": audit.file_sha256(source), "variables": []}])
+    path = tmp_path / "protocol.json"
+    path.write_text(json.dumps(p))
+    root = tmp_path / "measurement"
+    audit.main(["--dataset-root", str(dataset), "--protocol", str(path), "--output-dir", str(root)])
+    return root, dataset
+
+
+def refresh_output_hash(root, name):
+    path = root / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["outputs"][name] = audit.file_sha256(root / name)
+    path.write_text(json.dumps(manifest))
+
+
+def test_independent_verifier_reconciles_all_originals_not_biology(verified_fixture):
+    root, dataset = verified_fixture
+    result = verifier.verify(root, dataset)
+    assert result["original_pair_scores_independently_reconstructed"] == 1
+    assert result["measured_events"] == 1
+    assert result["sessions_reconciled"] == 1
+    assert result["contained_candidates_reconciled"] == 1
+    assert result["max_absolute_original_order_error"] < 1e-12
+    assert result["theta_control_verified"] is False
+    assert result["biological_association_verified"] is False
+
+
+def test_verifier_checks_the_actual_loaded_copy(verified_fixture, tmp_path):
+    root, _ = verified_fixture
+    dataset = tmp_path / "different_copy"
+    folder = dataset / "Rat1/Open1"
+    folder.mkdir(parents=True)
+    (folder / "Spike_Data.mat").write_text("a different raw source")
+    with pytest.raises(ValueError, match="Loaded dataset hash"):
+        verifier.verify(root, dataset)
+
+
+def test_verifier_rejects_unhashed_extra_source(verified_fixture):
+    root, dataset = verified_fixture
+    (dataset / "Rat1/Open1/Extra_Marks.mat").write_text("unhashed optional source")
+    with pytest.raises(ValueError, match="file inventory"):
+        verifier.verify(root, dataset)
+
+
+@pytest.mark.parametrize("problem", ["empty_pairs", "altered_order", "missing_candidate"])
+def test_verifier_rejects_invalid_tables_even_if_hashes_updated(verified_fixture, problem):
+    import pandas as pd
+    root, dataset = verified_fixture
+    name = "candidate_event_inventory.csv" if problem == "missing_candidate" else "candidate_pair_order.csv"
+    frame = pd.read_csv(root / name)
+    if problem in ("empty_pairs", "missing_candidate"):
+        frame = frame.iloc[:0]
+    else:
+        frame.loc[0, "a_before_b_asymmetry"] += .1
+    frame.to_csv(root / name, index=False)
+    refresh_output_hash(root, name)
+    with pytest.raises(ValueError):
+        verifier.verify(root, dataset)

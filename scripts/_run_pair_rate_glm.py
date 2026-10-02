@@ -45,6 +45,10 @@ def design(train, target, p):
         outside |= (b < a.min()) | (b > a.max())
     spatial_columns = axes[0][0].shape[1] * axes[1][0].shape[1]
     require(spatial_columns <= p["glm_max_spatial_features"], "Spatial basis exceeds frozen bounded capacity")
+    main_penalty = p.get("glm_main_effect_l2_penalty", p["glm_l2_penalty"])
+    require(np.isfinite(main_penalty) and 0 < main_penalty <= p["glm_l2_penalty"],
+            "Main-effect GLM penalty must be positive and no larger than spatial penalty")
+    spatial_scale = np.sqrt(main_penalty / p["glm_l2_penalty"])
     blocks = []
     for side, data in enumerate((train, target)):
         bx, by = axes[0][side].toarray(), axes[1][side].toarray()
@@ -61,6 +65,8 @@ def design(train, target, p):
             train_speed = np.log(train["speed"])
             scaled = (log_speed - train_speed.mean()) / max(float(train_speed.std()), .1)
         speed = np.column_stack([scaled**k for k in range(1, p["glm_speed_degree"] + 1)])
+        # Rescaling gives group-specific L2 penalties with the existing Poisson solver.
+        spatial = spatial * spatial_scale
         features = [spatial, sparse.csr_matrix(direction), sparse.csr_matrix(theta), sparse.csr_matrix(speed)]
         if p["glm_spatial_direction_interaction"]:
             features.extend(spatial.multiply(direction[:, j, None]) for j in (0, 1))
@@ -141,7 +147,7 @@ def crossfit(counts, times, labels, width, p, covariates, prepared=None, *, retu
             diagnostics.append({"fold": f, "status": "no_guarded_training_bins", "validation_bins": int(validation.sum())})
             continue
         weight = np.r_[np.ones(training.sum()), pseudo_weight]
-        alpha = p["glm_l2_penalty"] / weight.sum()
+        alpha = p.get("glm_main_effect_l2_penalty", p["glm_l2_penalty"]) / weight.sum()
 
         def fit_cell(k):
             y = np.r_[counts[training, k], p["global_rate_prior_spikes"] / pseudo_weight]

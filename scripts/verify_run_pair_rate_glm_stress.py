@@ -83,6 +83,9 @@ def independent_residuals(counts, times, covariates, p, *, return_prediction=Fal
         x = sparse.vstack((x, sparse.csr_matrix(np.asarray(x.mean(axis=0)))), format="csr")
         weight = np.r_[np.ones(train.sum()), p["global_rate_prior_exposure_s"] / p["run_bin_s"]]
         penalty = p["glm_l2_penalty"] / weight.sum()
+        if "glm_main_effect_l2_penalty" in p:
+            training = {k: v[train] for k, v in covariates.items()}
+            penalty = independent_penalties(training, p, x.shape[1]) / weight.sum()
         weight /= weight.sum()
 
         def fit_cell(k):
@@ -92,7 +95,9 @@ def independent_residuals(counts, times, covariates, p, *, return_prediction=Fal
             def objective(coefficient):
                 eta = np.asarray(x @ coefficient[:-1]).ravel() + coefficient[-1]
                 mu = np.exp(eta)
-                loss = weight @ (mu - y * eta) + penalty * (coefficient[:-1] @ coefficient[:-1]) / 2
+                regularization = (penalty * (coefficient[:-1] @ coefficient[:-1]) if np.ndim(penalty) == 0 else
+                                  penalty @ (coefficient[:-1] ** 2)) / 2
+                loss = weight @ (mu - y * eta) + regularization
                 error = weight * (mu - y)
                 gradient = np.r_[np.asarray(x.T @ error).ravel() + penalty * coefficient[:-1], error.sum()]
                 return loss, gradient
@@ -107,6 +112,25 @@ def independent_residuals(counts, times, covariates, p, *, return_prediction=Fal
     prediction = np.maximum(prediction, p["mean_count_floor"])
     residual = (counts - prediction) / np.sqrt(prediction)
     return (residual, prediction) if return_prediction else residual
+
+
+def independent_penalties(training, p, n_features):
+    """Penalty on unscaled coefficients, independently of producer feature scaling."""
+    main, spatial = p["glm_main_effect_l2_penalty"], p["glm_l2_penalty"]
+    check(np.isfinite(main) and 0 < main <= spatial, "Invalid main-effect penalty")
+    dimensions = []
+    for k in (0, 1):
+        step = p["glm_position_knot_cm"]
+        low = np.floor(training["position"][:, k].min() / step) * step
+        high = max(np.ceil(training["position"][:, k].max() / step) * step, low + step)
+        dimensions.append(int(round((high - low) / step)) + p["glm_spline_degree"])
+    n_spatial = dimensions[0] * dimensions[1]
+    n_main = 2 * p["glm_direction_harmonics"] + 2 * training["theta"].shape[1] * p["glm_theta_harmonics"] + p["glm_speed_degree"]
+    n_interaction = n_spatial * (2 * int(p["glm_spatial_direction_interaction"]) +
+                               2 * training["theta"].shape[1] * int(p["glm_spatial_theta_interaction"]))
+    penalties = np.r_[np.full(n_spatial, spatial), np.full(n_main, main), np.full(n_interaction, spatial)]
+    check(len(penalties) == n_features, "Independent penalty dimensions disagree")
+    return penalties
 
 
 def main(argv=None):

@@ -17,7 +17,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts._provenance import build_script_provenance, file_sha256  # noqa: E402
-from scripts._replay_pair_prediction import fit, hierarchical_weights, nuisance_features, require  # noqa: E402
+from scripts._replay_pair_prediction import (  # noqa: E402
+    baseline_support, fit, hierarchical_weights, nuisance_features, require,
+)
 from scripts.check_replay_pair_prediction_development import write_csv  # noqa: E402
 
 
@@ -35,7 +37,7 @@ def diagnostic_gain(fields, pre, post, feature, penalty=1):
     baseline = nuisance_features(pre, fields["pre_rate_a"], fields["pre_rate_b"],
                                 fields["event_spikes_a"], fields["event_spikes_b"], fields["participation"])
     outcome = post - pre
-    gain, slopes = [], []
+    gain, slopes, animals = [], [], []
     for animal in sorted(set(fields["animal"])):
         train, test = fields["animal"] != animal, fields["animal"] == animal
         w = hierarchical_weights(fields["animal"][train], fields["session"][train], fields["pause"][train])
@@ -47,8 +49,13 @@ def diagnostic_gain(fields, pre, post, feature, penalty=1):
         gain.append(target_w @ ((outcome[test] - base.predict(baseline[test])) ** 2 - (
             outcome[test] - model.predict(augmented[test])) ** 2))
         slopes.append(model.coefficient[-1] / model.scale[-1])
+        animals.append({"heldout_animal": str(animal), "heldout_gain": float(gain[-1]),
+                        "training_order_coefficient": float(slopes[-1]),
+                        "heldout_pair_rows": int(test.sum()),
+                        "heldout_zero_event_rows": int(np.sum(test & (fields["participation"] == 0))),
+                        **baseline_support(baseline[train], baseline[test], w)})
     return {"animal_balanced_gain": float(np.mean(gain)), "animals_positive": int(np.sum(np.array(gain) > 0)),
-            "mean_order_coefficient": float(np.mean(slopes)), "animals": len(gain)}
+            "mean_order_coefficient": float(np.mean(slopes)), "animals": len(gain)}, animals
 
 
 def main(argv=None):
@@ -78,7 +85,7 @@ def main(argv=None):
                                                      "spike_protocol": protocol_path})
     require(provenance["git_dirty"] is False, "Clean committed diagnostic checkout required")
     args.output_dir.mkdir(parents=True, exist_ok=False)
-    rows = []
+    rows, animal_rows = [], []
     for generator in m["generators"]:
         with np.load(args.results / f"{generator}_predictions.npz", allow_pickle=False) as fields:
             architecture = np.zeros(len(fields["pre"]))
@@ -92,16 +99,21 @@ def main(argv=None):
                 post = fields["post"] if endpoint == "fitted" else fields["oracle_post"]
                 for name, feature in (("measured_event_order", fields["order"][:, 0]),
                                       ("known_copying_architecture", architecture)):
-                    result = diagnostic_gain(fields, pre, post, feature, p["order_penalty"])
+                    result, animals = diagnostic_gain(fields, pre, post, feature, p["order_penalty"])
                     if endpoint == "fitted" and name == "measured_event_order":
                         require(np.isclose(result["animal_balanced_gain"], original_gains[generator],
                                            rtol=1e-10, atol=1e-15), "Primary development calculation changed")
                     rows.append({"generator": generator, "endpoint": endpoint, "order_feature": name,
                         "truth_supplied": endpoint == "oracle" or name == "known_copying_architecture",
+                        "feature_has_nonzero_values": bool(np.any(feature)),
                         **result, "new_spikes_generated": False, "primary_calibration_result": False})
+                    animal_rows.extend({"generator": generator, "endpoint": endpoint,
+                                        "order_feature": name, **row} for row in animals)
     write_csv(args.output_dir / "supplied_truth_diagnostic.csv", rows)
+    write_csv(args.output_dir / "animal_support_diagnostic.csv", animal_rows)
     result = {**provenance, "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "outputs_sha256": {"supplied_truth_diagnostic.csv": file_sha256(args.output_dir / "supplied_truth_diagnostic.csv")},
+        "outputs_sha256": {name: file_sha256(args.output_dir / name) for name in
+                           ("supplied_truth_diagnostic.csv", "animal_support_diagnostic.csv")},
         "scope": "Post-hoc supplied-truth diagnostic of the unchanged count-development bank; no primary endpoint, generator, threshold or result changed.",
         "new_spikes_generated": False, "primary_calibration_changed": False,
         "real_association_fit": False, "biological_inference_authorized": False, "goal_complete": False}

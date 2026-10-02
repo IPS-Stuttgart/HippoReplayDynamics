@@ -98,6 +98,33 @@ class Fit:
         return (x / self.scale) @ self.coefficient
 
 
+def baseline_support(training, target, weights):
+    """Identify controls whose held-out predictions are not training-identifiable."""
+    training, target, weights = map(lambda x: np.asarray(x, float), (training, target, weights))
+    require(training.ndim == target.ndim == 2 and training.shape[1] == target.shape[1]
+            and training.shape[1] > 0 and weights.shape == (len(training),) and len(training) > 0
+            and (weights > 0).all() and all(np.isfinite(x).all() for x in (training, target, weights)),
+            "Aligned finite baseline support arrays required")
+    weights = weights / weights.sum()
+    scale = np.sqrt(np.einsum("i,ij,ij->j", weights, training, training))
+    scale[scale == 0] = 1
+    design = training / scale * np.sqrt(weights[:, None])
+    # The full right basis is needed only when there are fewer rows than columns.
+    _, singular, right = np.linalg.svd(design, full_matrices=len(design) < design.shape[1])
+    tolerance = max(design.shape) * np.finfo(float).eps * singular[0]
+    rank = int(np.sum(singular > tolerance))
+    target_scaled = target / scale
+    loading = np.linalg.norm(target_scaled @ right[rank:].T, axis=1)
+    numerical_guard = 100 * np.finfo(float).eps * max(design.shape) * np.maximum(
+        1, np.linalg.norm(target_scaled, axis=1))
+    unsupported = loading > numerical_guard
+    return {"baseline_training_rank": rank, "baseline_columns": training.shape[1],
+            "baseline_max_heldout_nullspace_loading": float(loading.max(initial=0)),
+            "baseline_unsupported_heldout_rows": int(unsupported.sum()),
+            "baseline_prediction_support_complete": not bool(unsupported.any()),
+            "scope": "Machine-precision training row-space diagnostic; no observation excluded or prediction changed"}
+
+
 def fit(features, response, weights, *, order_column=None, order_penalty=1.0):
     x, y, w = map(lambda v: np.asarray(v, float), (features, response, weights))
     require(x.ndim == 2 and x.shape[0] > 0 and y.shape == w.shape == (len(x),),
@@ -136,6 +163,7 @@ def prediction_check(data, *, order_penalty=1.0):
         training = data.animal != animal
         target = ~training
         weights = hierarchical_weights(data.animal[training], data.session[training], data.pause[training])
+        support = baseline_support(data.baseline[training], data.baseline[target], weights)
         for condition in range(data.order.shape[1]):
             # The baseline is deliberately refitted inside each condition too.
             base = fit(data.baseline[training], response[training], weights,
@@ -149,6 +177,7 @@ def prediction_check(data, *, order_penalty=1.0):
                           "training_animals": len(animals) - 1,
                           "training_rows": int(training.sum()), "heldout_rows": int(target.sum()),
                           "baseline_rank": base.rank, "augmented_rank": model.rank,
+                          **support,
                           "order_coefficient_original_units": float(model.coefficient[-1] / model.scale[-1]),
                           "training_feature_rms": model.scale.tolist()})
     require(np.isfinite(predictions).all() and np.isfinite(baseline_predictions).all(),
@@ -171,6 +200,8 @@ def prediction_check(data, *, order_penalty=1.0):
     summary = {"animals": len(animals), "pair_rows": len(data.pre),
                "animals_with_nonzero_original_order": informative_animals,
                "minimum_informative_animal_coverage_met": informative_animals >= 3,
+               "baseline_prediction_support_complete": all(
+                   row["baseline_prediction_support_complete"] for row in folds),
                "n_shuffles": data.order.shape[1] - 1,
                "original_mean_animal_gain": float(animal_gain[:, 0].mean()),
                "shuffle_mean_animal_gains": animal_gain[:, 1:].mean(axis=0).tolist(),

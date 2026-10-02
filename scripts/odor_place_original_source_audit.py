@@ -53,11 +53,14 @@ def epochs(value, day):
     return {i + 1: inner[0, i] for i in range(inner.shape[1]) if inner[0, i].size}
 
 
-def intervals(times, states):
+def intervals(times, states, *, allow_zero_duration_on_off=False):
     times, states = np.asarray(times, float).ravel(), np.asarray(states, float).ravel()
     if len(times) != len(states) or not np.isfinite(times).all() or not np.isfinite(states).all():
         raise ValueError("Missing or nonfinite digital sensor records")
-    if np.any(np.diff(times) <= 0) or not np.isin(states, [0, 1]).all():
+    differences = np.diff(times)
+    allowed = (differences == 0) & (states[:-1] == 1) & (states[1:] == 0)
+    if (np.any(differences < 0) or not np.isin(states, [0, 1]).all()
+            or np.any((differences == 0) & ~(allowed & allow_zero_duration_on_off))):
         raise ValueError("Duplicate/nonchronological timestamps or nonbinary sensor state")
     if len(states) > 1 and np.any(np.diff(states) == 0):
         raise ValueError("Repeated sensor states cannot be silently collapsed")
@@ -67,11 +70,13 @@ def intervals(times, states):
     return output
 
 
-def channel(dio, number):
+def channel(dio, number, *, allow_zero_duration_on_off=False):
     if not isinstance(dio, np.ndarray) or dio.dtype != object or dio.size < number:
         raise ValueError("Missing original digital-input channel")
     record = struct(dio.ravel()[number - 1])
-    return intervals(record["time"], record["state"])
+    if allow_zero_duration_on_off and number != 5:
+        raise ValueError("Zero-duration exception applies only to nose-poke channel 5")
+    return intervals(record["time"], record["state"], allow_zero_duration_on_off=allow_zero_duration_on_off)
 
 
 def matching(values, target, tolerance):
@@ -195,9 +200,21 @@ def unresolved_source_trials(record, reason):
     return rows
 
 
+def assign_source_identity(rows, record, animal, day, epoch, tolerance):
+    """Trigger identity survives an epoch changing from unresolved to reconstructed."""
+    triggers = np.asarray(record["allTriggers"], float).ravel()
+    prefix = f"{animal}:day{day}:epoch{epoch}"
+    for row in rows:
+        matches = matching(triggers, row["nosepoke_start_s"], tolerance)
+        index = int(matches[0]) if len(matches) == 1 else None
+        row["source_trigger_index"] = index
+        row["source_trial_key"] = f"{prefix}:trigger{index}" if index is not None else None
+        row["raw_sensor_sample_key"] = f"{prefix}:onset{float(row['nosepoke_start_s']).hex()}:sample{row['source_sample_index']}"
+
+
 def reconstruct_epoch(dio, odor_record, windows, data, centers, protocol):
     tol, channels = protocol["clock_match_tolerance_s"], protocol["dio_channels_one_based"]
-    nose = channel(dio, channels["nose_poke"])
+    nose = channel(dio, channels["nose_poke"], allow_zero_duration_on_off=protocol.get("allow_zero_duration_nosepoke_on_off", False))
     odors = {side: channel(dio, channels[side + "_odor"]) for side in ["left", "right"]}
     wells = {side: channel(dio, channels[side + "_well"]) for side in ["left", "right"]}
     pumps = {side: channel(dio, channels[side + "_pump"]) for side in ["left", "right"]}
@@ -212,6 +229,8 @@ def reconstruct_epoch(dio, odor_record, windows, data, centers, protocol):
         row = empty_trial(index, start, end, annotated_error(odor_record, start, tol))
         if end is None:
             row["exclusion_reason"] = "missing_nosepoke_offset"
+        elif end == start:
+            row["exclusion_reason"] = "zero_duration_nosepoke_pulse"
         elif end - start < protocol["minimum_odor_sample_s"]:
             row["exclusion_reason"] = "premature_odor_sample"
         else:
@@ -315,6 +334,7 @@ def transitions(rows, protocol):
             if nxt and nxt["trial_verified"] and row["cue_verified"]:
                 outcome = "correction_to_prior_cue_arm" if nxt["chosen_arm"] == row["cue"] else "repeated_mistaken_arm"
             output.append({"animal": key[0], "source_day": key[1], "source_epoch": key[2], "error_sample_index": row["source_sample_index"],
+                           "source_trial_key": row.get("source_trial_key"), "source_trigger_index": row.get("source_trigger_index"),
                            "asset_id": row["nwb_asset_id"], "error_trial_id": row["nwb_trial_id"], "cue": row["cue"], "mistaken_arm": row["chosen_arm"],
                            "next_sample_index": nxt["source_sample_index"] if nxt else None, "next_cue": nxt["cue"] if nxt else None,
                            "next_chosen_arm": nxt["chosen_arm"] if nxt else None, "next_task_correct": nxt["task_correct"] if nxt else None,
@@ -334,6 +354,54 @@ def coverage_passed(animal_rows, eligible, cells, screen):
     return passed, animals
 
 
+def compare_previous_audit(out, previous, trials, transition_rows):
+    """Compare trigger-keyed observations without equating reconstructed row numbers."""
+    old = read_table(previous, "source_trial_inventory")
+    old_transitions = read_table(previous, "post_error_transition_inventory")
+    new_keys = {}
+    for row in trials:
+        new_keys.setdefault((row["animal"], row["source_day"], row["source_epoch"]), []).append(row)
+    comparisons = []
+    matched_new = set()
+    transition_lookup = {r["source_trial_key"]: r for r in transition_rows if r.get("source_trial_key")}
+    old_transition_lookup = {(r["animal"], r["source_day"], r["source_epoch"], r["error_sample_index"]): r for r in old_transitions}
+    for row in old:
+        candidates = new_keys.get((row["animal"], int(row["source_day"]), int(row["source_epoch"])), [])
+        hits = [r for r in candidates if abs(r["nosepoke_start_s"] - float(row["nosepoke_start_s"])) <= 0.005]
+        if len(hits) != 1:
+            comparisons.append({"animal": row["animal"], "source_trial_key": None, "old_source_sample_index": row["source_sample_index"],
+                                "comparison": "unmatched_or_ambiguous", "previous_onset_s": row["nosepoke_start_s"],
+                                "previous_eligible": False, "amended_eligible": False})
+            continue
+        new = hits[0]
+        matched_new.add(new["raw_sensor_sample_key"])
+        before = old_transition_lookup.get((row["animal"], row["source_day"], row["source_epoch"], row["source_sample_index"]), {})
+        after = transition_lookup.get(new["source_trial_key"], {})
+        was, now = before.get("eligible_source_transition") == "True", bool(after.get("eligible_source_transition", False))
+        classification = "recovered" if now and not was else "newly_excluded" if was and not now else "unchanged" if was else "still_excluded"
+        was_trial = row["trial_verified"] == "True"
+        trial_change = "recovered" if new["trial_verified"] and not was_trial else "newly_excluded" if was_trial and not new["trial_verified"] else "unchanged" if was_trial else "still_excluded"
+        comparisons.append({"animal": row["animal"], "source_trial_key": new["source_trial_key"], "raw_sensor_sample_key": new["raw_sensor_sample_key"], "old_source_sample_index": row["source_sample_index"],
+                            "amended_source_sample_index": new["source_sample_index"], "comparison": classification,
+                            "trial_verification_change": trial_change,
+                            "previous_onset_s": row["nosepoke_start_s"], "amended_onset_s": new["nosepoke_start_s"],
+                            "previous_eligible": was, "amended_eligible": now,
+                            "previous_exclusion": before.get("exclusion_reason", row["exclusion_reason"]),
+                            "amended_exclusion": after.get("exclusion_reason", new["exclusion_reason"]),
+                            "previous_trial_verified": row["trial_verified"], "amended_trial_verified": new["trial_verified"]})
+    for new in trials:
+        if new["raw_sensor_sample_key"] not in matched_new:
+            comparisons.append({"animal": new["animal"], "source_trial_key": new["source_trial_key"],
+                                "raw_sensor_sample_key": new["raw_sensor_sample_key"], "amended_onset_s": new["nosepoke_start_s"],
+                                "comparison": "newly_inventoried", "amended_trial_verified": new["trial_verified"],
+                                "amended_exclusion": new["exclusion_reason"]})
+    write_table(out, "parser_amendment_trial_comparison", comparisons)
+    counts = Counter(r["comparison"] for r in comparisons)
+    write_table(out, "parser_amendment_summary", [{"comparison": name, "n_samples": count} for name, count in sorted(counts.items())])
+    return {"previous_audit": str(previous.resolve()), "previous_identity_sha256": digest(previous / (PREFIX + "inventory_identity.json")),
+            "counts": dict(counts)}
+
+
 def inventory(args, protocol):
     out = args.output_dir
     existing = out / (PREFIX + "inventory_identity.json")
@@ -343,6 +411,15 @@ def inventory(args, protocol):
             raise ValueError("Resume requires the original committed producer; use a new output directory for changed code")
         verify(args, protocol)
         return json.loads((out / (PREFIX + "decision.json")).read_text())
+    if protocol.get("previous_audit_identity_sha256"):
+        if getattr(args, "previous_audit", None) is None or digest(args.previous_audit / (PREFIX + "inventory_identity.json")) != protocol["previous_audit_identity_sha256"]:
+            raise ValueError("Amended inventory requires the frozen --previous-audit")
+        previous_identity = json.loads((args.previous_audit / (PREFIX + "inventory_identity.json")).read_text())
+        for name, expected in previous_identity["output_sha256"].items():
+            if digest(args.previous_audit / name) != expected:
+                raise ValueError("Immutable previous source audit differs: " + name)
+        if digest(args.previous_audit / (PREFIX + "decision.json")) != previous_identity["decision_sha256"]:
+            raise ValueError("Immutable previous source decision differs")
     source_identity = json.loads((args.dataset_root / "metadata/source_verified.json").read_text())
     if digest(args.source_archive) != source_identity["sha256"] or source_identity["published_digest"] != protocol["source_published_md5"]:
         raise ValueError("Amended source acquisition identity changed")
@@ -419,6 +496,9 @@ def inventory(args, protocol):
                     original = records.get((animal, day, "odorTriggers"), {}).get(epoch)
                     if original is not None:
                         reconstructed = unresolved_source_trials(struct(original), "unresolved_epoch: " + row["failure_reason"])
+                original = records.get((animal, day, "odorTriggers"), {}).get(epoch)
+                if original is not None:
+                    assign_source_identity(reconstructed, struct(original), animal, day, epoch, protocol["clock_match_tolerance_s"])
                 for trial in reconstructed:
                     trial.update(animal=animal, source_day=day, source_epoch=epoch, primary_condition=primary)
                 trials.extend(reconstructed)
@@ -465,12 +545,18 @@ def inventory(args, protocol):
     screen = protocol["screening"]
     eligible = [r for r in transition_rows if r["eligible_source_transition"]]
     passed, covered_animals = coverage_passed(animal_rows, eligible, cells, screen)
+    amendment = None
+    if getattr(args, "previous_audit", None) is not None:
+        amendment = compare_previous_audit(out, args.previous_audit, trials, transition_rows)
+    pulses = [r for r in trials if r["exclusion_reason"] == "zero_duration_nosepoke_pulse"]
+    write_table(out, "invalid_zero_duration_samples", pulses, None if pulses else ["animal", "source_day", "source_epoch", "nosepoke_start_s", "exclusion_reason"])
     decision = {"status": "source_ready_for_neural_feasibility" if passed else "inconclusive_source_feasibility",
                 "source_screen_passed": passed, "ready_for_calibration": False, "n_source_trials": len(trials), "n_source_errors": len(transition_rows),
                 "n_eligible_source_transitions": len(eligible), "animals_with_both_conditions": covered_animals,
                 "n_pinned_nwb_trials": len(target), "n_nwb_uniquely_reconciled": sum(r["nwb_clock_status"] == "unique_within_5ms" for r in trials),
                 "source_release_sha256": source_identity["sha256"], "association_fitted": False, "neural_processing_performed": False,
                 "v1_stopgate_preserved": True, "manuscript_claims_changed": False,
+                "n_invalid_zero_duration_samples": len(pulses), "parser_amendment_comparison": amendment,
                 "recommended_next_action": "bounded_run_decoder_and_ripple_feasibility" if passed else "stop_primary_post_error_cue_branch"}
     atomic_json(out / (PREFIX + "decision.json"), decision)
     make_figures(out, transition_rows, track_records, protocol)
@@ -478,7 +564,9 @@ def inventory(args, protocol):
                 "code_commit": git_metadata()["code_commit"], "output_sha256": {p.name: digest(p) for p in out.glob(PREFIX + "*.csv")},
                 "sensor_checkpoint_sha256": digest(out / (PREFIX + "source_sensor_checkpoints.json")),
                 "decision_sha256": digest(out / (PREFIX + "decision.json")),
-                "reference_checkpoint_sha256": {p.name: digest(p) for p in (args.reference_inventory / "checkpoints").glob("*.json")}}
+                "reference_checkpoint_sha256": {p.name: digest(p) for p in (args.reference_inventory / "checkpoints").glob("*.json")},
+                "previous_audit_sha256": ({p.name: digest(p) for p in args.previous_audit.glob(PREFIX + "*.csv")}
+                                          if getattr(args, "previous_audit", None) else {})}
     atomic_json(out / (PREFIX + "inventory_identity.json"), identity)
     return decision
 
@@ -539,6 +627,12 @@ def verify(args, protocol):
     for name, expected in identity["reference_checkpoint_sha256"].items():
         if digest(args.reference_inventory / "checkpoints" / name) != expected:
             raise ValueError("Reference header checkpoint differs")
+    if identity.get("previous_audit_sha256"):
+        if getattr(args, "previous_audit", None) is None:
+            raise ValueError("Amended verification requires its immutable --previous-audit")
+        for name, expected in identity["previous_audit_sha256"].items():
+            if digest(args.previous_audit / name) != expected:
+                raise ValueError("Previous source audit differs: " + name)
     path = out / (PREFIX + "source_sensor_checkpoints.json")
     if digest(path) != identity["sensor_checkpoint_sha256"]:
         raise ValueError("Sensor checkpoint differs")
@@ -559,12 +653,88 @@ def verify(args, protocol):
     observed = [tuple(r[k] for k in fields) for r in table]
     if expected != observed:
         raise ValueError("Independent transition labels differ")
+    raw_verification = verify_raw_trials(args.source_archive, independent, protocol) if protocol.get("allow_zero_duration_nosepoke_on_off") else None
     result = {"status": "verified_source_accounting", "n_source_trials": len(actual), "n_source_errors": len(computed),
               "n_eligible_source_transitions": sum(r["eligible_source_transition"] for r in computed),
               "scope": "independent saved sensor-to-trial accounting; not a second tracking reconstruction or neural validation",
+              "raw_source_reconciliation": raw_verification,
               "ready_for_calibration": False, "association_fitted": False}
     atomic_json(out / (PREFIX + "verification.json"), result)
+    if (out / (PREFIX + "neural_identity.json")).exists():
+        from scripts.odor_place_neural_feasibility import verify_neural_artifacts
+        verify_neural_artifacts(args, protocol)
     return result
+
+
+def verify_raw_trials(archive_path, rows, protocol):
+    """Check verified rows against raw DIO edges without the interval/trial parser."""
+    grouped = {}
+    for row in rows:
+        grouped.setdefault((row["animal"], row["source_day"], row["source_epoch"]), []).append(row)
+    passed, zero_count, members = 0, 0, {}
+    with zipfile.ZipFile(archive_path) as archive:
+        for entry in archive.infolist():
+            match = re.fullmatch(r"(CS\d+)(DIO|odorTriggers)(\d+)\.mat", PurePosixPath(entry.filename).name)
+            if not match:
+                continue
+            animal, role, day = match.groups()
+            day = int(day)
+            if (animal, day) not in {(a, d) for a, d, _ in grouped}:
+                continue
+            variable = ROLES[role]
+            members[(animal, day, role)] = epochs(loadmat(io.BytesIO(archive.read(entry)), struct_as_record=False,
+                                                         squeeze_me=False, variable_names=[variable])[variable], day)
+        for (animal, day, epoch), trials in grouped.items():
+            dio = members[(animal, day, "DIO")][epoch]
+            annotation = struct(members[(animal, day, "odorTriggers")][epoch])
+            raw = {}
+            for label, number in protocol["dio_channels_one_based"].items():
+                record = struct(dio.ravel()[number - 1])
+                t, state = np.asarray(record["time"], float).ravel(), np.asarray(record["state"], float).ravel()
+                raw[label] = (t, state, np.flatnonzero(state == 1))
+            t, state, on_indices = raw["nose_poke"]
+            zeros = [i for i in on_indices if i + 1 < len(t) and t[i] == t[i + 1] and state[i + 1] == 0]
+            zero_count += len(zeros)
+            for i in zeros:
+                matches = [r for r in trials if r["nosepoke_start_s"] == t[i] and r["nosepoke_stop_s"] == t[i]]
+                if len(matches) != 1 or matches[0]["trial_verified"] or matches[0]["exclusion_reason"] != "zero_duration_nosepoke_pulse":
+                    # A genuinely invalid second channel may still make the whole epoch unresolved.
+                    if any(r["trial_verified"] for r in trials):
+                        raise ValueError("Raw zero-duration pulse was lost or admitted as a trial")
+            for row in trials:
+                if not row["trial_verified"]:
+                    continue
+                hits = [i for i in on_indices if abs(t[i] - row["nosepoke_start_s"]) <= protocol["clock_match_tolerance_s"]]
+                if len(hits) != 1:
+                    raise ValueError("Independent raw nose-poke identity is ambiguous")
+                i = hits[0]
+                if i + 1 >= len(t) or state[i + 1] != 0 or t[i + 1] - t[i] < protocol["minimum_odor_sample_s"]:
+                    raise ValueError("Verified trial has no adequate raw sampling duration")
+                if abs(t[i + 1] - row["nosepoke_stop_s"]) > protocol["clock_match_tolerance_s"]:
+                    raise ValueError("Independent nose-poke offset differs")
+                odor_hits = []
+                for side in ["left", "right"]:
+                    times, _, indices = raw[side + "_odor"]
+                    odor_hits.extend(side for j in indices if t[i] - .005 <= times[j] <= t[i + 1] + .005)
+                if odor_hits != [row["cue"]]:
+                    raise ValueError("Independent odor cue differs")
+                subsequent = [t[j] for j in on_indices if t[j] > t[i]]
+                next_on = min(subsequent) if subsequent else float("inf")
+                well_hits = []
+                for side in ["left", "right"]:
+                    times, _, indices = raw[side + "_well"]
+                    well_hits.extend((times[j], side) for j in indices if t[i + 1] <= times[j] < next_on)
+                well_hits.sort()
+                if not well_hits or well_hits[0][1] != row["chosen_arm"] or abs(well_hits[0][0] - row["well_onset_s"]) > .005:
+                    raise ValueError("Independent first well choice differs")
+                trigger_hits = np.flatnonzero(np.abs(np.asarray(annotation["allTriggers"], float).ravel() - t[i]) <= .005)
+                if len(trigger_hits) != 1 or int(trigger_hits[0]) != row["source_trigger_index"]:
+                    raise ValueError("Stable source trigger identity differs")
+                if row["task_correct"] != (row["chosen_arm"] == row["cue"]):
+                    raise ValueError("Independent task-rule outcome differs")
+                passed += 1
+    return {"status": "verified_against_raw_digital_edges", "verified_trials": passed,
+            "zero_duration_pulses_observed": zero_count, "parser_reused": False}
 
 
 def report(args, protocol):
@@ -601,11 +771,24 @@ def report(args, protocol):
     lines.extend(["", "## Exclusions", ""] + [f"- {key}: {value}" for key, value in sorted(counts.items())])
     lines.extend(["", "## Next decision", "", f"Recommended: `{decision['recommended_next_action']}`.",
                   "A source pass would allow bounded RUN/ripple feasibility only, not sequence calibration or a biological claim. CA1 spike identity, RUN decoding and supported ripple opportunities remain unmeasured. Novelty remains provisional.", ""])
+    if protocol.get("allow_zero_duration_nosepoke_on_off"):
+        comparison = decision.get("parser_amendment_comparison") or {}
+        lines.extend(["## Parser amendment", "", "Only adjacent channel-5 on/off edges at identical timestamps are admitted to the inventory as invalid samples. They are not eligible trials and interrupt transitions. All other chronology rules and thresholds are unchanged.",
+                      f"Invalid zero-duration samples preserved: {decision['n_invalid_zero_duration_samples']}.",
+                      f"Previous-audit comparison: `{json.dumps(comparison.get('counts', {}), sort_keys=True)}`.",
+                      f"Independent raw-edge check: `{json.dumps(verification.get('raw_source_reconciliation'), sort_keys=True)}`.", ""])
+        from scripts.odor_place_neural_feasibility import append_report
+        append_report(lines, args, protocol)
     (out / (PREFIX + "go_no_go.md")).write_text("\n".join(lines))
-    return {**decision, "non_rescoring": True, "independently_accounted": True}
+    neural_path = out / (PREFIX + "neural_decision.json")
+    neural = json.loads(neural_path.read_text()) if neural_path.exists() else {}
+    return {**decision, **neural, "non_rescoring": True, "independently_accounted": True}
 
 
 def dispatch(args, protocol):
+    if protocol.get("delivery_scope") == "repaired_original_source_then_conditional_neural_feasibility" and args.stage in {"acquire-neural", "run-qc"}:
+        from scripts.odor_place_neural_feasibility import dispatch as neural_dispatch
+        return neural_dispatch(args, protocol)
     if args.stage == "run-qc":
         raise ValueError("This amended delivery is source-only; neural processing requires a separately reviewed stage")
     return {"inventory": inventory, "verify": verify, "report": report}[args.stage](args, protocol)

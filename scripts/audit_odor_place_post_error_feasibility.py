@@ -56,27 +56,35 @@ def acquire(args, protocol):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["acquire", "inventory", "run-qc", "verify", "report"])
+    parser.add_argument("stage", choices=["acquire", "inventory", "acquire-neural", "run-qc", "verify", "report"])
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--source-archive", type=Path, required=True)
     parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--reference-inventory", type=Path, help="Immutable version-1 header inventory for amended source reconciliation")
+    parser.add_argument("--previous-audit", type=Path, help="Immutable original version-3 source audit for parser amendment comparison")
     parser.add_argument("--seed", type=int, default=20261001)
     args = parser.parse_args()
     protocol = json.loads(args.protocol.read_text())
     if args.seed != protocol["seed"] or protocol["scope"] != "feasibility_only_no_replay_behavior_association":
         parser.error("Seed and scope must match the frozen protocol")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    provenance = build_script_provenance(input_paths={"protocol": args.protocol})
+    inputs = {"protocol": args.protocol, "source_archive": args.source_archive}
+    if args.reference_inventory is not None:
+        inputs["reference_inventory"] = args.reference_inventory / (PREFIX + "inventory_identity.json")
+    if args.previous_audit is not None:
+        inputs["previous_audit"] = args.previous_audit / (PREFIX + "inventory_identity.json")
+    provenance = build_script_provenance(input_paths=inputs)
     if args.stage == "acquire":
         result = acquire(args, protocol)
-    elif protocol.get("delivery_scope") == "bounded_original_source_audit_before_neural_processing":
+    elif protocol.get("delivery_scope") in {"bounded_original_source_audit_before_neural_processing", "repaired_original_source_then_conditional_neural_feasibility"}:
         if args.reference_inventory is None:
             parser.error("The original-source audit requires --reference-inventory")
         from scripts.odor_place_original_source_audit import dispatch
         result = dispatch(args, protocol)
     else:
+        if args.stage == "acquire-neural":
+            parser.error("acquire-neural requires the conditional-neural protocol")
         from scripts.odor_place_feasibility_core import dispatch
         result = dispatch(args, protocol)
     environment = {}

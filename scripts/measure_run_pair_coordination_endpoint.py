@@ -142,7 +142,24 @@ def period_endpoint(bank, period, p):
     covariates = {key: bank[f"{period}_{source}"][valid] for key, source in
                   (("position", "position_cm"), ("direction", "direction_rad"),
                    ("speed", "speed_cm_s"), ("theta", "theta_phase_rad"))}
-    residual, diagnostics = crossfit_rates(counts[valid], times[valid], labels, p["run_bin_s"], p, covariates=covariates)
+    if p.get("rate_training_support") == "same_period_full_run":
+        pool = support_pool(bank, period, p, counts[valid], times[valid], covariates)
+        pool_counts, pool_times, pool_covariates, target = pool
+        try:
+            from scripts._run_pair_rate_glm import crossfit
+        except ModuleNotFoundError:
+            from _run_pair_rate_glm import crossfit
+        pool_labels = strata(pool_covariates["position"], pool_covariates["direction"], pool_covariates["speed"], pool_covariates["theta"], p)
+        fitted, diagnostics, means, baseline = crossfit(pool_counts, pool_times, pool_labels, p["run_bin_s"],
+            p, pool_covariates, return_predictions=True)
+        residual = fitted[target]
+        diagnostics["training_pool_unseen_stratum_fraction"] = diagnostics.pop("unseen_stratum_fraction")
+        diagnostics.update(rate_training_support="same_period_full_run", training_pool_bins=len(pool_times),
+            predicted_bins=int(np.isfinite(residual).all(axis=1).sum()), total_bins=len(target),
+            predicted_mean_count_min=float(means[target].min()), predicted_mean_count_max=float(means[target].max()),
+            heldout_poisson_improvement_over_global=float(np.sum(xlogy(counts[valid], means[target] / baseline[target]) - means[target] + baseline[target])))
+    else:
+        residual, diagnostics = crossfit_rates(counts[valid], times[valid], labels, p["run_bin_s"], p, covariates=covariates)
     predicted = np.isfinite(residual).all(axis=1)
     if p.get("rate_model_family") == "smooth_poisson_glm" and not predicted.all():
         return None, {"status": "incomplete_glm_crossfit_predictions", "source_bins": len(times),
@@ -153,6 +170,26 @@ def period_endpoint(bank, period, p):
                                                   p["run_bin_s"], p["lag_min_s"], p["lag_max_s"])
     return matrix if opportunities else None, {"status": "measured" if opportunities else "no_physical_lag_pairs", "source_bins": len(times),
                     "usable_bins": int(predicted.sum()), "physical_lag_opportunities": opportunities, **diagnostics}
+
+
+def support_pool(bank, period, p, counts, times, covariates):
+    prefix = f"{period}_rate_support"
+    require(p.get("rate_model_family") == "smooth_poisson_glm", "Support expansion requires the frozen smooth GLM")
+    phase = bank[f"{prefix}_theta_phase_rad"]
+    require(phase.ndim == 2 and phase.shape[1] > 0, "Native support theta required")
+    require(np.allclose(bank[f"{prefix}_bin_duration_s"], p["run_bin_s"], rtol=0, atol=1e-12), "Support bin width changed")
+    valid = np.isfinite(phase).all(axis=1)
+    pool_times, pool_counts = bank[f"{prefix}_time_s"][valid], bank[f"{prefix}_counts"][valid]
+    require(len(pool_times) > 0 and np.all(np.diff(pool_times) > 0), "Empty or backward support clock")
+    require(pool_counts.shape == (len(pool_times), counts.shape[1]), "Support population changed")
+    pool_covariates = {key: bank[f"{prefix}_{name}"][valid] for key, name in
+        (("position", "position_cm"), ("direction", "direction_rad"), ("speed", "speed_cm_s"), ("theta", "theta_phase_rad"))}
+    index = np.searchsorted(pool_times, times)
+    require(np.all(index < len(pool_times)), "Endpoint clock missing from support")
+    require(np.array_equal(pool_times[index], times) and np.array_equal(pool_counts[index], counts), "Endpoint counts or clock changed")
+    for key, value in covariates.items():
+        require(np.array_equal(pool_covariates[key][index], value), "Endpoint covariates changed")
+    return pool_counts, pool_times, pool_covariates, index
 
 
 def main(argv=None):

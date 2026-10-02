@@ -232,6 +232,24 @@ def frozen_native_pause(row, native):
     return {k: pause[k] for k in ("start_s", "end_s", "epoch_index")}
 
 
+def support_run_masks(links, pause, matching):
+    """Broaden rate training only, within the original period and native epoch."""
+    start, stop = links["t"][:-1], links["t"][1:]
+    run = links["good"] & (links["epoch"] == pause["epoch_index"])
+    run &= (links["speed"] > matching["run_min_speed_cm_s"]) & (links["speed"] <= matching["run_max_speed_cm_s"])
+    window = matching["run_search_window_s"]
+    return (run & (start >= pause["start_s"] - window) & (stop <= pause["start_s"]),
+            run & (start >= pause["end_s"]) & (stop <= pause["end_s"] + window))
+
+
+def assert_previous_bank(saved, previous):
+    if not set(previous.files) <= set(saved):
+        raise ValueError("Frozen measurement fields disappeared")
+    for key in previous.files:
+        if not np.array_equal(saved[key], previous[key], equal_nan=True):
+            raise ValueError(f"Frozen measurement bank changed: {key}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-audit", type=Path, required=True)
@@ -239,6 +257,8 @@ def main(argv=None):
     parser.add_argument("--acquisition-source", type=Path, required=True)
     parser.add_argument("--protocol", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--previous-measurement-dir", type=Path)
+    parser.add_argument("--previous-measurement-verification", type=Path)
     args = parser.parse_args(argv)
     p = json.loads(args.protocol.read_text())
     parent = json.loads((args.input_audit / "manifest.json").read_text())
@@ -248,13 +268,30 @@ def main(argv=None):
         checked(Path(parent["input_file_paths"][name]), parent["input_file_sha256"][name])
     source_p = json.loads(Path(parent["input_file_paths"]["protocol"]).read_text())
     matching = json.loads(Path(parent["input_file_paths"]["matching_protocol"]).read_text())
+    previous_banks = None
+    if p.get("include_rate_training_support", False):
+        if args.previous_measurement_dir is None or args.previous_measurement_verification is None:
+            raise ValueError("Support sensitivity requires immutable, independently verified previous measurements")
+        previous_manifest = args.previous_measurement_dir / "manifest.json"
+        previous = json.loads(previous_manifest.read_text())
+        previous_verification = json.loads(args.previous_measurement_verification.read_text())
+        if not previous_verification.get("verified") or previous_verification["input_file_sha256"]["manifest"] != file_sha256(previous_manifest):
+            raise ValueError("Previous measurement verification identity differs")
+        for name, digest in previous["outputs_sha256"].items():
+            checked(args.previous_measurement_dir / name, digest)
+        previous_banks = pd.read_csv(args.previous_measurement_dir / "banks.csv").set_index(["session", "pause_id"])
+        if not previous_banks.index.is_unique:
+            raise ValueError("Duplicate previous measurement identity")
     if source_p["protocol_id"] != p["parent_input_protocol"]:
         raise ValueError("Unexpected parent protocol")
     verification = json.loads(args.input_verification.read_text())
     if not verification.get("verified") or verification.get("input_file_sha256", {}).get("manifest") != file_sha256(args.input_audit / "manifest.json"):
         raise ValueError("Parent census lacks matching successful independent verification")
-    provenance = build_script_provenance(input_paths={"protocol": args.protocol,
-        "parent_manifest": args.input_audit / "manifest.json", "input_verification": args.input_verification})
+    inputs = {"protocol": args.protocol, "parent_manifest": args.input_audit / "manifest.json", "input_verification": args.input_verification}
+    if previous_banks is not None:
+        inputs.update(previous_measurement_manifest=previous_manifest,
+                      previous_measurement_verification=args.previous_measurement_verification)
+    provenance = build_script_provenance(input_paths=inputs)
     if provenance["git_dirty"] or provenance["code_commit"] == "unavailable":
         raise ValueError("Run from a clean committed checkout")
     combine, crop, _ = source_combiner(args.acquisition_source, source_p["acquisition_source_commit"])
@@ -326,6 +363,11 @@ def main(argv=None):
             for label, bank in banks.items():
                 saved.update({f"{label}_{k}": v for k, v in bank.items()})
                 fractions[label] = np.mean(np.isfinite(bank["theta_phase_rad"]), axis=0).tolist() if len(bank["counts"]) else [0.0] * len(references)
+            if previous_banks is not None:
+                masks = support_run_masks(links, frozen, matching)
+                for label, mask in zip(("pre", "post"), masks, strict=True):
+                    pool = run_bank(spikes, ids, links, mask, clock, phases, supports, p)
+                    saved.update({f"{label}_rate_support_{k}": v for k, v in pool.items()})
             event_count, pair_count = 0, 0
             for candidate in candidates:
                 if candidate["start_s"] < frozen["start_s"] or candidate["end_s"] > frozen["end_s"]:
@@ -368,6 +410,11 @@ def main(argv=None):
                         pair_count += 1
             tag = f"{session.animal}_{stable_seed(p['seed'], session.session + pause.pause_id):016x}"
             bank_path = args.output_dir / "banks" / f"{tag}.npz"
+            if previous_banks is not None:
+                old = previous_banks.loc[(session.session, pause.pause_id)]
+                checked(Path(old.bank_path), old.bank_sha256)
+                with np.load(old.bank_path, allow_pickle=False) as previous_bank:
+                    assert_previous_bank(saved, previous_bank)
             np.savez_compressed(bank_path, **saved)
             bank_rows.append({**key, "bank_path": str(bank_path), "bank_sha256": file_sha256(bank_path)})
             theta_ok = all(x >= p["minimum_theta_supported_run_fraction"] for label in fractions for x in fractions[label])

@@ -55,9 +55,25 @@ def independently_measure_period(bank, period, p):
     check(all(np.isfinite(value).all() for value in covariates.values()), "Missing nuisance covariates")
     check(np.all(covariates["speed"] > p["speed_edges_cm_s"][0]) and
           np.all(covariates["speed"] <= p["speed_edges_cm_s"][-1]), "RUN speed outside frozen bounds")
-    residual, mean = independent_residuals(counts, times, covariates, p, return_prediction=True)
+    if p.get("rate_training_support") == "same_period_full_run":
+        prefix = f"{period}_rate_support"
+        finite = np.isfinite(bank[f"{prefix}_theta_phase_rad"]).all(axis=1)
+        pool_times, pool_counts = bank[f"{prefix}_time_s"][finite], bank[f"{prefix}_counts"][finite]
+        check(np.allclose(bank[f"{prefix}_bin_duration_s"], p["run_bin_s"], rtol=0, atol=1e-12), "Support width changed")
+        pool_covariates = {key: bank[f"{prefix}_{name}"][finite] for key, name in
+            (("position", "position_cm"), ("direction", "direction_rad"), ("speed", "speed_cm_s"), ("theta", "theta_phase_rad"))}
+        target = np.searchsorted(pool_times, times)
+        check(np.all(target < len(pool_times)) and np.array_equal(pool_times[target], times), "Endpoint not in training support")
+        check(np.array_equal(pool_counts[target], counts), "Endpoint spikes changed")
+        for key in covariates:
+            check(np.array_equal(pool_covariates[key][target], covariates[key]), "Endpoint covariates changed")
+        residual, mean = independent_residuals(pool_counts, pool_times, pool_covariates, p, return_prediction=True)
+        baseline = global_predictions(pool_counts, pool_times, p)[target]
+        residual, mean = residual[target], mean[target]
+    else:
+        residual, mean = independent_residuals(counts, times, covariates, p, return_prediction=True)
+        baseline = global_predictions(counts, times, p)
     matrix, opportunities = independent_coordination(residual, times, p)
-    baseline = global_predictions(counts, times, p)
     improvement = float(np.sum(xlogy(counts, mean / baseline) - mean + baseline))
     return matrix, {"source_bins": len(phase), "usable_bins": len(times),
         "predicted_bins": len(times), "total_bins": len(times),

@@ -113,9 +113,18 @@ def verify(root):
     pairs = pd.read_csv(root / "pairs.csv", float_precision="round_trip")
     bouts = pd.read_csv(root / "theta_bouts.csv", float_precision="round_trip")
     arrays = pd.read_csv(root / "consumed_arrays.csv")
+    previous_banks = None
+    if p.get("include_rate_training_support", False):
+        previous_path = Path(manifest["input_file_paths"]["previous_measurement_manifest"])
+        require(file_sha256(previous_path) == manifest["input_file_sha256"]["previous_measurement_manifest"], "Changed previous measurement")
+        previous = json.loads(previous_path.read_text())
+        for name, digest in previous["outputs_sha256"].items():
+            require(file_sha256(previous_path.parent / name) == digest, "Changed previous measurement output")
+        previous_banks = pd.read_csv(previous_path.parent / "banks.csv").set_index(["session", "pause_id"])
+        require(previous_banks.index.is_unique and set(previous_banks.index) == set(pauses.index), "Frozen pause identities changed")
     require(not bank_rows.empty and not bank_rows[["session", "pause_id"]].duplicated().any(), "Empty/duplicate banks")
     require(len(bank_rows) == len(pauses), "Incomplete frozen pause banks")
-    count_bins, event_count, pair_count, checked_arrays = 0, 0, 0, 0
+    count_bins, event_count, pair_count, checked_arrays, support_bins = 0, 0, 0, 0, 0
     for identity, local_banks in bank_rows.groupby("session"):
         print(f"VERIFY {identity}", flush=True)
         with h5py.File(parents.loc[identity, "path"], "r") as h:
@@ -167,13 +176,21 @@ def verify(root):
                 with np.load(row.bank_path, allow_pickle=False) as bank:
                     ids = bank["unit_ids"]
                     require(set(map(int, ids)) <= set(source), "Bank includes unknown CA1 identity")
-                    for period in ("pre", "post"):
+                    if previous_banks is not None:
+                        old = previous_banks.loc[(identity, row.pause_id)]
+                        require(file_sha256(old.bank_path) == old.bank_sha256, "Previous bank changed")
+                        with np.load(old.bank_path, allow_pickle=False) as previous_bank:
+                            require(set(previous_bank.files) <= set(bank.files), "Frozen fields missing")
+                            for name in previous_bank.files:
+                                require(np.array_equal(previous_bank[name], bank[name], equal_nan=True), "Frozen source bank values changed")
+                    periods = ["pre", "post"] + (["pre_rate_support", "post_rate_support"] if previous_banks is not None else [])
+                    for period in periods:
                         times = bank[f"{period}_time_s"]
                         width = bank[f"{period}_bin_duration_s"]
                         link = bank[f"{period}_native_link"]
                         require(np.all(times - width / 2 >= position[link, 0] - 1e-10)
                                 and np.all(times + width / 2 <= position[link + 1, 0] + 1e-10), "RUN bin bridges native link")
-                        if period == "pre":
+                        if period.startswith("pre"):
                             require(np.all(times + width / 2 <= meta.start_s + 1e-10), "Future spikes enter PRE bank")
                         else:
                             require(np.all(times - width / 2 >= meta.end_s - 1e-10), "Pause spikes enter POST bank")
@@ -184,7 +201,30 @@ def verify(root):
                         counts = np.column_stack([np.searchsorted(source[int(u)], ends, side="left")
                                                   - np.searchsorted(source[int(u)], starts, side="left") for u in ids])
                         require(np.array_equal(counts, bank[f"{period}_counts"]), "Native RUN spike counts disagree")
-                        count_bins += len(times)
+                        if "rate_support" in period:
+                            support_bins += len(times)
+                            dt = np.diff(position[:, 0])
+                            delta = np.diff(position[:, 1:3], axis=0)
+                            speed = np.linalg.norm(delta, axis=1) / dt
+                            native_good = (dt <= matching["tracking_max_gap_s"]) & np.isfinite(delta).all(axis=1)
+                            native_good &= (speed > matching["run_min_speed_cm_s"]) & (speed <= matching["run_max_speed_cm_s"])
+                            left, right = ((meta.start_s - matching["run_search_window_s"], meta.start_s)
+                                           if period.startswith("pre") else (meta.end_s, meta.end_s + matching["run_search_window_s"]))
+                            native_good &= (position[:-1, 0] >= left) & (position[1:, 0] <= right)
+                            edges = position[0, 0] + np.arange(int(np.floor((position[-1, 0] - position[0, 0]) / p["run_count_bin_s"]))) * p["run_count_bin_s"]
+                            centers = (edges + edges + p["run_count_bin_s"]) / 2
+                            owner = np.searchsorted(position[:, 0], edges, side="right") - 1
+                            ok = (owner >= 0) & (owner < len(native_good))
+                            owner_safe = np.clip(owner, 0, len(native_good) - 1)
+                            ok &= native_good[owner_safe] & (edges + p["run_count_bin_s"] <= position[owner_safe + 1, 0] + 1e-10)
+                            require(np.allclose(times, centers[ok], rtol=0, atol=1e-10), "Full-period training support census differs")
+                            require(np.allclose(bank[f"{period}_speed_cm_s"], speed[link]), "Support speed differs")
+                            angle = np.mod(np.arctan2(delta[link, 1], delta[link, 0]), 2 * np.pi)
+                            require(np.allclose(bank[f"{period}_direction_rad"], angle), "Support direction differs")
+                            w = (times - position[link, 0]) / dt[link]
+                            require(np.allclose(bank[f"{period}_position_cm"], position[link, 1:3] + w[:, None] * delta[link]), "Support position differs")
+                        else:
+                            count_bins += len(times)
                         for column, (phase, support) in enumerate(zip(phases, spectral_support, strict=True)):
                             right = np.searchsorted(clock, times)
                             left = right - 1
@@ -196,8 +236,9 @@ def verify(root):
                             expected[~ok | (np.abs(z) <= 1e-12)] = np.nan
                             require(np.allclose(expected, bank[f"{period}_theta_phase_rad"][:, column],
                                                 atol=1e-9, equal_nan=True), "Native LFP theta phase disagrees")
-                        fractions = np.mean(np.isfinite(bank[f"{period}_theta_phase_rad"]), axis=0)
-                        require(np.allclose(fractions, json.loads(meta[f"{period}_theta_supported_fractions"])), "Theta coverage denominator mismatch")
+                        if "rate_support" not in period:
+                            fractions = np.mean(np.isfinite(bank[f"{period}_theta_phase_rad"]), axis=0)
+                            require(np.allclose(fractions, json.loads(meta[f"{period}_theta_supported_fractions"])), "Theta coverage denominator mismatch")
                     local_events = events[events.session.eq(identity) & events.pause_id.eq(row.pause_id) & events.order_measured.eq(True)]
                     for event in local_events.itertuples(index=False):
                         prefix = f"event_{event.event_index}"
@@ -227,6 +268,7 @@ def verify(root):
     return {"verified": True, "native_arrays_verified": checked_arrays, "run_bins_reconstructed": count_bins,
             "candidate_events_reconstructed": event_count, "dependent_pair_orders_reconstructed": pair_count,
             "frozen_pause_banks_verified": len(bank_rows), "association_tested": False, "replay_validated": False,
+            "rate_training_support_bins_reconstructed": support_bins,
             "verification_scope": "Raw-array hashes, all saved RUN/event counts, source-compatible LFP phase, exported-interval spectra, whole-bin order and summaries; not a detector census, sequence calibration or RUN-change association"}
 
 

@@ -89,3 +89,25 @@ def test_group_verifier_tightens_optimizer_without_changing_the_model(monkeypatc
     observed.clear()
     verifier.independent_residuals(y, t, c, {k: v for k, v in p.items() if k != "glm_main_effect_l2_penalty"})
     assert observed and all(o["gtol"] == 1e-9 and o["ftol"] == 64 * np.finfo(float).eps for o in observed)
+
+
+def test_explicit_scaled_solver_matches_unscaled_independent_fit_on_broad_spatial_support():
+    t, c, p = inputs()
+    p = {**p, "glm_group_solver": "scaled_scipy_lbfgs", "glm_tolerance": 1e-11}
+    c["position"] = np.column_stack((70 + 60 * np.sin(t / 3), 80 + 50 * np.cos(t / 5)))
+    y = np.random.default_rng(18).poisson(.015 * np.exp(np.cos(c["theta"][:, :1])), size=(len(t), 2))
+    residual, qc, prediction, _ = glm.crossfit(y, t, np.zeros(len(t), int), .001, p, c, return_predictions=True)
+    other, mean = independent_residuals(y, t, c, p, return_prediction=True)
+    np.testing.assert_allclose(prediction, mean, rtol=1e-3, atol=1e-7)
+    np.testing.assert_allclose(residual, other, rtol=1e-3, atol=1e-5)
+    assert qc["predicted_bins"] == len(t)
+
+
+def test_precise_protocol_preserves_every_model_and_cohort_setting_except_numerical_solver():
+    _, _, old = inputs()
+    old["glm_workers"] = 4
+    p = json.loads((Path(__file__).parents[1] / "docs/run_pair_coordination_endpoint_v4_group_precision_protocol.json").read_text())
+    documentation = {"protocol_id", "frozen_before", "scope", "rate_model", "source_and_support", "claim_boundary"}
+    assert set(p) - set(old) == {"glm_group_solver"} and not set(old) - set(p)
+    assert all(p[k] == old[k] for k in set(old) - documentation - {"glm_tolerance"})
+    assert p["glm_tolerance"] == 1e-11 and p["glm_group_solver"] == "scaled_scipy_lbfgs"

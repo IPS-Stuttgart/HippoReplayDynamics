@@ -7,6 +7,7 @@ import json
 
 import numpy as np
 from scipy import sparse
+from scipy.optimize import minimize
 from scipy.special import xlogy
 from sklearn.linear_model import PoissonRegressor
 from sklearn.preprocessing import SplineTransformer
@@ -96,6 +97,11 @@ def prepare(times, covariates, p):
             p["crossfit_time_block_s"] > 2 * p["crossfit_guard_s"], "Invalid guarded crossfit")
     require(p.get("glm_speed_scaling", "training_standardized_log") in
             ("training_standardized_log", "fixed_log_run_bounds"), "Unknown GLM speed scaling")
+    require(p.get("glm_group_solver", "sklearn_lbfgs") in ("sklearn_lbfgs", "scaled_scipy_lbfgs"),
+            "Unknown grouped GLM solver")
+    if p.get("glm_group_solver") == "scaled_scipy_lbfgs":
+        require("glm_main_effect_l2_penalty" in p and p["glm_tolerance"] <= 1e-11,
+                "Precise grouped GLM solver requires explicit group penalty and tight gradient tolerance")
     require(all(np.isfinite(p[k]) and p[k] > 0 for k in
                 ("glm_position_knot_cm", "glm_l2_penalty", "glm_tolerance", "mean_count_floor")),
             "Finite positive GLM spacing, penalty, tolerance and count floor required")
@@ -151,6 +157,25 @@ def crossfit(counts, times, labels, width, p, covariates, prepared=None, *, retu
 
         def fit_cell(k):
             y = np.r_[counts[training, k], p["global_rate_prior_spikes"] / pseudo_weight]
+            if p.get("glm_group_solver") == "scaled_scipy_lbfgs":
+                x = item["fit_design"]
+                normalized_weight = weight / weight.sum()
+                initial = np.r_[np.zeros(x.shape[1]), np.log(normalized_weight @ y)]
+
+                def objective(coefficient):
+                    eta = np.asarray(x @ coefficient[:-1]).ravel() + coefficient[-1]
+                    mu = np.exp(eta)
+                    loss = normalized_weight @ (mu - y * eta) + alpha * (coefficient[:-1] @ coefficient[:-1]) / 2
+                    error = normalized_weight * (mu - y)
+                    gradient = np.r_[np.asarray(x.T @ error).ravel() + alpha * coefficient[:-1], error.sum()]
+                    return loss, gradient
+
+                # Explicit loss convergence avoids the fixed sklearn termination setting.
+                fitted = minimize(objective, initial, method="L-BFGS-B", jac=True,
+                    options={"maxiter": p["glm_max_iter"], "maxls": 50,
+                             "gtol": p["glm_tolerance"], "ftol": 4 * np.finfo(float).eps})
+                prediction = np.exp(np.asarray(item["validation_design"] @ fitted.x[:-1]).ravel() + fitted.x[-1])
+                return prediction, int(fitted.nit), fitted.success and np.isfinite(prediction).all() and fitted.nit < p["glm_max_iter"]
             model = PoissonRegressor(alpha=alpha, solver="lbfgs", fit_intercept=True,
                                      max_iter=p["glm_max_iter"], tol=p["glm_tolerance"])
             model.fit(item["fit_design"], y, sample_weight=weight)

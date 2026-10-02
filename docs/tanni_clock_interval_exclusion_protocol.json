@@ -1,0 +1,17 @@
+{
+  "protocol_id": "tanni_clock_interval_exclusion_diagnostic_v1_20261002",
+  "parent_protocol": "docs/tanni_replay_run_input_audit_protocol.json",
+  "seed": 20261002,
+  "delivery_scope": "Tracking-only exclusion feasibility, not neural cohort admission or biological association",
+  "pulse_guard_count": 1,
+  "acquisition_guard_s": 0.1,
+  "maximum_camera_sample_distance_s": 0.1,
+  "invalid_interval_rule": "For each backward camera pulse, implicate both adjacent original pulse indices plus one original pulse on each side. Exclude the acquisition interval spanning these pulses and all frames whose published nearest-pulse identities are implicated, with 100 ms acquisition-clock padding. Merge overlapping intervals, never enlarge them after observing reconciliation failures.",
+  "raw_frame_chronology": "Every original frame timestamp must be finite and strictly increasing before any coordinate filtering; duplicates, nonfinite values and frame reversals remain unresolved.",
+  "pulse_identity": "Equal camera/acquisition pulse counts and unique camera pulse values are mandatory. Preserve original indices. Reproduce published conversion, without clock offsets, pulse truncation or reordering data.",
+  "tracking_rule": "Retain the exact original multi-camera grid anchor. Exclude all grid points inside invalid intervals or without a within-100-ms valid sample from every camera. Reset the stateful geometry combiner on every excluded grid point. Compare every remaining deposited row with this reset reconstruction at the parent 5-ms/0.05-cm tolerances. Any mismatch rejects the whole recording; do not selectively remove mismatching rows.",
+  "original_tracking_identity": "No deposited timestamp, coordinate or row number is changed. Export exclusion runs by original deposited row index. A later separately frozen neural audit must mask excluded rows without compressing time or bridging gaps, and require complete pause/matching intervals to avoid exclusions.",
+  "neural_analysis_enabled": false,
+  "cohort_changed": false,
+  "claim_boundary": "Numeric source reconciliation outside exclusions is not a hardware latency measurement. This diagnostic cannot qualify units, theta, replay or an association. Original protocols and cohorts remain immutable."
+}

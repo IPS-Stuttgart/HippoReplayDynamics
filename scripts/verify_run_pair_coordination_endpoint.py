@@ -132,6 +132,8 @@ def main(argv=None):
     for name, sha in source_manifest["outputs_sha256"].items():
         check(file_sha256(source / name) == sha, f"Measurement output changed: {name}")
     p = json.loads(Path(m["input_file_paths"]["protocol"]).read_text())
+    check(p.get("rate_model_family") != "smooth_poisson_glm",
+          "This verifier is for the original joint-stratum estimator, not the GLM amendment")
     banks = pd.read_csv(source / "banks.csv")
     source_pauses = pd.read_csv(source / "pauses.csv").set_index(["session", "pause_id"])
     pauses = pd.read_csv(root / "pauses.csv").set_index(["session", "pause_id"])

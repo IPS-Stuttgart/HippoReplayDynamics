@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from importlib.metadata import version
 import json
 from pathlib import Path
+import platform
 
 import numpy as np
 import pandas as pd
@@ -63,6 +65,7 @@ def main(argv=None):
     parser.add_argument("--endpoint-dir", type=Path, required=True)
     parser.add_argument("--endpoint-verification", type=Path, required=True)
     parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--rate-protocol", type=Path, help="Explicit development estimator revision; default preserves the source estimator")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     root = args.endpoint_dir
@@ -72,14 +75,16 @@ def main(argv=None):
           "Identity-matched independent endpoint verification required")
     for name, digest in m["outputs_sha256"].items():
         check(file_sha256(root / name) == digest, f"Changed endpoint: {name}")
-    endpoint_protocol = Path(m["input_file_paths"]["protocol"])
-    check(file_sha256(endpoint_protocol) == m["input_file_sha256"]["protocol"], "Changed estimator protocol")
+    source_protocol = Path(m["input_file_paths"]["protocol"])
+    check(file_sha256(source_protocol) == m["input_file_sha256"]["protocol"], "Changed source estimator protocol")
+    endpoint_protocol = args.rate_protocol or source_protocol
     estimator = json.loads(endpoint_protocol.read_text())
     p = json.loads(args.protocol.read_text())
     check(p["replicates"] >= 2 and p["cells_per_pause"] >= 2 and p["base_rate_hz"] > 0,
           "Positive generator dimensions required")
     provenance = build_script_provenance(input_paths={"endpoint_manifest": root / "manifest.json",
-        "endpoint_verification": args.endpoint_verification, "estimator_protocol": endpoint_protocol, "stress_protocol": args.protocol})
+        "endpoint_verification": args.endpoint_verification, "estimator_protocol": endpoint_protocol,
+        "source_estimator_protocol": source_protocol, "stress_protocol": args.protocol})
     check(provenance["git_dirty"] is False and provenance["code_commit"] != "unavailable", "Clean committed checkout required")
     source_path = Path(m["input_file_paths"]["measurement_manifest"])
     check(file_sha256(source_path) == m["input_file_sha256"]["measurement_manifest"], "Changed source measurement")
@@ -94,7 +99,7 @@ def main(argv=None):
     selected = selected.groupby("animal", sort=True).head(1)
     check(len(selected) > 0, "No fixed eligible animal pauses")
     args.output_dir.mkdir(parents=True, exist_ok=False)
-    rows, inventory = [], []
+    rows, inventory, fit_rows = [], [], []
     for pause in selected.itertuples(index=False):
         bank_row = banks[(banks.session == pause.session) & (banks.pause_id == pause.pause_id)]
         check(len(bank_row) == 1, "Ambiguous bank identity")
@@ -112,16 +117,32 @@ def main(argv=None):
                 times = bank[f"{period}_time_s"][valid]
                 labels = strata(bank[f"{period}_position_cm"][valid], bank[f"{period}_direction_rad"][valid],
                                 bank[f"{period}_speed_cm_s"][valid], theta, estimator)
-                periods[period] = (times, labels, known_intensity(theta, references, period, estimator["run_bin_s"], p))
+                covariates = {key: bank[f"{period}_{source}"][valid] for key, source in
+                              (("position", "position_cm"), ("direction", "direction_rad"),
+                               ("speed", "speed_cm_s"), ("theta", "theta_phase_rad"))}
+                prepared = None
+                if estimator.get("rate_model_family") == "smooth_poisson_glm":
+                    try:
+                        from scripts._run_pair_rate_glm import prepare
+                    except ModuleNotFoundError:
+                        from _run_pair_rate_glm import prepare
+                    prepared = prepare(times, covariates, estimator)
+                periods[period] = (times, labels, known_intensity(theta, references, period, estimator["run_bin_s"], p),
+                                   covariates, prepared)
             salt = int.from_bytes(hashlib.sha256(f"{pause.session}:{pause.pause_id}".encode()).digest()[:8], "little")
             rng = np.random.default_rng(np.random.SeedSequence([p["seed"], salt]))
             for replicate in range(p["replicates"]):
                 scores = {}
-                for period, (times, labels, mu) in periods.items():
+                for period, (times, labels, mu, covariates, prepared) in periods.items():
                     counts = rng.poisson(mu)
-                    adjusted, _ = crossfit_rates(counts, times, labels, estimator["run_bin_s"], estimator)
+                    adjusted, fit_qc = crossfit_rates(counts, times, labels, estimator["run_bin_s"], estimator,
+                                                     covariates=covariates, prepared=prepared)
                     usable = np.isfinite(adjusted).all(axis=1)
-                    check(usable.any(), "Missing crossfit stress predictions")
+                    check(usable.all(), f"Missing/nonconverged predictions: {pause.animal}/{period}/{replicate}; {fit_qc}")
+                    fit_rows.append({"animal": pause.animal, "session": pause.session, "pause_id": pause.pause_id,
+                        "replicate": replicate, "period": period,
+                        **{k: v for k, v in fit_qc.items() if k != "folds"},
+                        "fold_diagnostics": json.dumps(fit_qc["folds"])})
                     oracle = (counts[usable] - mu[usable]) / np.sqrt(mu[usable])
                     fitted, fitted_n = residual_coordination(adjusted[usable], times[usable], estimator["run_bin_s"],
                                                             estimator["lag_min_s"], estimator["lag_max_s"])
@@ -143,11 +164,16 @@ def main(argv=None):
                           "cells": n, "replicates": p["replicates"]})
     frame = pd.DataFrame(rows)
     summary = summarize(frame, p["replicates"])
-    outputs = {"replicates.csv": frame, "pair_stress_summary.csv": summary, "inventory.csv": pd.DataFrame(inventory)}
+    outputs = {"replicates.csv": frame, "pair_stress_summary.csv": summary,
+               "inventory.csv": pd.DataFrame(inventory), "fit_quality.csv": pd.DataFrame(fit_rows)}
     for name, output in outputs.items():
         output.to_csv(args.output_dir / name, index=False)
     biased = int(summary.systematic_nuisance_bias_detected.sum())
     result = {**provenance, "protocol_id": p["protocol_id"], "replicates_per_animal": p["replicates"],
+              "rate_model_family": estimator.get("rate_model_family", "joint_stratum"),
+              "all_crossfit_predictions_required": True,
+              "environment_versions": {"python": platform.python_version(),
+                  **{k: version(k) for k in ("numpy", "scipy", "pandas", "scikit-learn")}},
               "selected_animals": len(inventory), "fixed_animal_pair_family": len(summary),
               "biased_animal_pairs": biased,
               "development_stress_status": "nuisance_bias_detected" if biased else "no_bias_detected_in_this_generator",

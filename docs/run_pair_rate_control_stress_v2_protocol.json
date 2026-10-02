@@ -1,0 +1,15 @@
+{
+  "protocol_id": "run_pair_rate_control_development_stress_v2_20261002",
+  "seed": 20261002,
+  "replicates": 200,
+  "cells_per_pause": 8,
+  "base_rate_hz": 15.0,
+  "theta_concentration": 1.25,
+  "post_even_cell_phase_shift_rad": 1.5707963267948966,
+  "pause_selection": "Same earliest theta-qualified measured pause per animal as v1, with the existing frozen cohort and original independently verified endpoint. No replacement pauses, cells or animals.",
+  "cell_selection": "Same first eight frozen unit IDs and their documented LFP reference correspondence as v1. This is development, not an untouched validation bank.",
+  "generator": "Exactly the v1 conditional independent-Poisson generator and per-pause random seeds. Saved native theta phases, fixed cellular preferences, pi/2 POST preference changes for even-numbered cells, and observed PRE/POST behavior, clock gaps and finite-phase masks remain unchanged. There are no neural interactions or replay-driven updates.",
+  "comparison": "Compare the amended guarded training-only smooth Poisson GLM with the oracle using exact generating intensities, identical counts and physical-lag support. Any missing prediction or nonconverged fit stops the run rather than removing windows or cells. Record both the original source protocol and amended estimator identities.",
+  "summary": "Same fixed 112 animal-pair development family and Bonferroni-corrected two-sided Monte Carlo t intervals as v1. Compare systematic fitted-minus-oracle discrepancies. Do not interpret these dependent pairs as biological subjects or this development test as a full-procedure false-positive calibration.",
+  "claim_boundary": "A development improvement does not authorize a biological association. A separate frozen validation bank must still cover no-update, rate drift, shared theta, existing coordination, order-specific update and regression-to-mean. Replay validation, animal-level inference and the complete PF test remain unfinished."
+}

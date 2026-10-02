@@ -37,8 +37,14 @@ def strata(position, direction, speed, theta, p):
     return labels
 
 
-def crossfit_rates(counts, times, labels, width, p):
+def crossfit_rates(counts, times, labels, width, p, covariates=None, prepared=None):
     """Rate fitting uses only the period supplied, and never held-out-block spikes."""
+    if p.get("rate_model_family") == "smooth_poisson_glm":
+        try:
+            from scripts._run_pair_rate_glm import crossfit
+        except ModuleNotFoundError:
+            from _run_pair_rate_glm import crossfit
+        return crossfit(counts, times, labels, width, p, covariates, prepared)
     counts, times, labels = np.asarray(counts), np.asarray(times, float), np.asarray(labels, int)
     require(counts.ndim == 2 and len(counts) == len(times) == len(labels) and len(times) > 0,
             "Nonempty aligned RUN counts and clock required")
@@ -133,8 +139,14 @@ def period_endpoint(bank, period, p):
         return None, {"status": "no_valid_theta_endpoints", "source_bins": len(times), "usable_bins": 0}
     labels = strata(bank[f"{period}_position_cm"][valid], bank[f"{period}_direction_rad"][valid],
                     bank[f"{period}_speed_cm_s"][valid], theta[valid], p)
-    residual, diagnostics = crossfit_rates(counts[valid], times[valid], labels, p["run_bin_s"], p)
+    covariates = {key: bank[f"{period}_{source}"][valid] for key, source in
+                  (("position", "position_cm"), ("direction", "direction_rad"),
+                   ("speed", "speed_cm_s"), ("theta", "theta_phase_rad"))}
+    residual, diagnostics = crossfit_rates(counts[valid], times[valid], labels, p["run_bin_s"], p, covariates=covariates)
     predicted = np.isfinite(residual).all(axis=1)
+    if p.get("rate_model_family") == "smooth_poisson_glm" and not predicted.all():
+        return None, {"status": "incomplete_glm_crossfit_predictions", "source_bins": len(times),
+                      "usable_bins": 0, **diagnostics}
     if not predicted.any():
         return None, {"status": "no_crossfit_predictions", "source_bins": len(times), "usable_bins": 0, **diagnostics}
     matrix, opportunities = residual_coordination(residual[predicted], times[valid][predicted],

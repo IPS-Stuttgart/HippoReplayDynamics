@@ -102,8 +102,9 @@ def independent_residuals(counts, times, covariates, p, *, return_prediction=Fal
                 gradient = np.r_[np.asarray(x.T @ error).ravel() + penalty * coefficient[:-1], error.sum()]
                 return loss, gradient
             result = minimize(objective, initial, method="L-BFGS-B", jac=True,
-                options={"maxiter": p["glm_max_iter"], "maxls": 50, "gtol": 1e-9,
-                         "ftol": 64 * np.finfo(float).eps})
+                options={"maxiter": p["glm_max_iter"], "maxls": 50,
+                         "gtol": 1e-11 if "glm_main_effect_l2_penalty" in p else 1e-9,
+                         "ftol": (4 if "glm_main_effect_l2_penalty" in p else 64) * np.finfo(float).eps})
             check(result.success, f"Independent Poisson fit failed: {result.message}")
             return np.exp(np.asarray(z @ result.x[:-1]).ravel() + result.x[-1])
         with ThreadPoolExecutor(max_workers=p["glm_workers"]) as pool:

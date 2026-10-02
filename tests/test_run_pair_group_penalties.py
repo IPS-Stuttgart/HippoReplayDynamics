@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from scripts import _run_pair_rate_glm as glm
+from scripts import verify_run_pair_rate_glm_stress as verifier
 from scripts.verify_run_pair_rate_glm_stress import features, independent_penalties, independent_residuals
 
 
@@ -70,3 +71,21 @@ def test_group_protocol_changes_no_clock_support_or_cohort_settings():
     changed = {"protocol_id", "frozen_before", "scope", "rate_model", "source_and_support", "claim_boundary", "glm_l2_penalty"}
     assert set(p) - set(old) == {"glm_main_effect_l2_penalty"} and not set(old) - set(p)
     assert all(p[k] == old[k] for k in set(old) - changed)
+
+
+def test_group_verifier_tightens_optimizer_without_changing_the_model(monkeypatch):
+    t, c, p = inputs()
+    observed = []
+    original = verifier.minimize
+
+    def recorded(*args, **kwargs):
+        observed.append(kwargs["options"].copy())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(verifier, "minimize", recorded)
+    y = np.random.default_rng(7).poisson(.04, size=(len(t), 1))
+    verifier.independent_residuals(y, t, c, p)
+    assert observed and all(o["gtol"] == 1e-11 and o["ftol"] == 4 * np.finfo(float).eps for o in observed)
+    observed.clear()
+    verifier.independent_residuals(y, t, c, {k: v for k, v in p.items() if k != "glm_main_effect_l2_penalty"})
+    assert observed and all(o["gtol"] == 1e-9 and o["ftol"] == 64 * np.finfo(float).eps for o in observed)

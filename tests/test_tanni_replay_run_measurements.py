@@ -1,14 +1,17 @@
 """Actual LFP phase and native-time measurement checks; no biology calibration."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from scipy.fftpack import next_fast_len
 from scipy.signal import butter, convolve, filtfilt, hilbert
 from scipy.signal.windows import gaussian
 
 from scripts.audit_replay_order_run_coordination import epoch_links, order_asymmetry, whole_bin_shuffles
 from scripts import measure_tanni_replay_run_coordination as measure
+from scripts import verify_tanni_replay_run_measurements as verify
 
 
 def protocols():
@@ -33,6 +36,7 @@ def test_source_theta_matches_pinned_filter_hilbert_and_smoothing():
     expected = convolve(np.unwrap(np.angle(analytic)), kernel / kernel.sum(), mode="same")
     expected = (expected + np.pi) % (2 * np.pi) - np.pi
     np.testing.assert_allclose(phase[valid], expected[valid], atol=1e-10)
+    np.testing.assert_allclose(phase, verify.reference_phase(raw, fs, p), atol=1e-10, equal_nan=True)
     assert not valid[:int(fs)].any() and not valid[-int(fs):].any()
 
 
@@ -132,6 +136,7 @@ def test_order_shuffles_keep_full_vectors_not_individual_cell_times():
     counts = np.array([[4, 0], [3, 0], [0, 2], [0, 5]])
     original = order_asymmetry(counts, .02, .005, .06)
     assert original[0, 1] > 0
+    np.testing.assert_array_equal(original, verify.reference_order(counts, .02, .005, .06))
     for shuffled in whole_bin_shuffles(counts, 20, 20261002):
         np.testing.assert_array_equal(shuffled.sum(axis=0), counts.sum(axis=0))
         assert sorted(map(tuple, shuffled)) == sorted(map(tuple, counts))
@@ -141,3 +146,15 @@ def test_protocol_cannot_claim_replay_or_completed_association():
     p, _ = protocols()
     assert not p["replay_sequence_validated"] and not p["association_fit_enabled"]
     assert "not_validated_replay" in p["candidate_label"]
+
+
+def test_frozen_pause_uses_exact_native_boundary_not_csv_last_bit():
+    original = {"tracking_start_index": 34528, "epoch_index": 0,
+                "start_s": 15901.530022499996, "end_s": 15902.063178312499}
+    row = SimpleNamespace(tracking_start_index=34528, epoch_index=0,
+                          pause_id="tracking:34528", start_s=original["start_s"], end_s=15902.0631783125)
+    pause = measure.frozen_native_pause(row, {34528: original})
+    assert pause["end_s"] == original["end_s"] and pause["end_s"] != row.end_s
+    row.end_s += .0001
+    with pytest.raises(ValueError, match="boundaries"):
+        measure.frozen_native_pause(row, {34528: original})

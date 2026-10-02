@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts._provenance import build_script_provenance, file_sha256  # noqa: E402
 from scripts.audit_replay_order_run_coordination import (  # noqa: E402
-    epoch_links, event_counts, link_spikes, matched_run, order_asymmetry,
+    epoch_links, event_counts, immobile_pauses, link_spikes, matched_run, order_asymmetry,
     stable_seed, whole_bin_shuffles,
 )
 from scripts.audit_tanni_replay_run_inputs import (  # noqa: E402
@@ -189,6 +189,16 @@ def run_bank(spikes, ids, links, mask, clock, phases, supports, p):
             "theta_phase_rad": theta, "bin_duration_s": np.full(len(hits), p["run_count_bin_s"])}
 
 
+def frozen_native_pause(row, native):
+    pause = native[int(row.tracking_start_index)]
+    if row.pause_id != f"tracking:{pause['tracking_start_index']}" or int(row.epoch_index) != pause["epoch_index"]:
+        raise ValueError("Frozen native pause identity differs")
+    if not np.allclose([row.start_s, row.end_s], [pause["start_s"], pause["end_s"]], rtol=0, atol=1e-9):
+        raise ValueError("Frozen pause boundaries differ from native timestamps")
+    # A CSV parser's final-bit rounding must not exclude a link at the native boundary.
+    return {k: pause[k] for k in ("start_s", "end_s", "epoch_index")}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-audit", type=Path, required=True)
@@ -218,7 +228,7 @@ def main(argv=None):
     args.output_dir.mkdir(parents=True, exist_ok=False)
     (args.output_dir / "banks").mkdir()
     sessions = pd.read_csv(args.input_audit / "session_inventory.csv")
-    pauses = pd.read_csv(args.input_audit / "matched_pause_inventory.csv")
+    pauses = pd.read_csv(args.input_audit / "matched_pause_inventory.csv", float_precision="round_trip")
     source_arrays = pd.read_csv(args.input_audit / "consumed_array_inventory.csv")
     selected_pauses = pauses[pauses.earliest_nonoverlap_supported.eq(True)]
     event_rows, pair_rows, pause_rows, theta_rows, consumed, session_rows, bank_rows = [], [], [], [], [], [], []
@@ -236,6 +246,7 @@ def main(argv=None):
             raise ValueError("Parent source arrays or reconciliation changed")
         consumed.extend([{**identity, "path": str(path), **x} for x in inventory])
         links = epoch_links(loaded["position"], np.array([[loaded["position"][0, 0], loaded["position"][-1, 0]]]), matching)
+        native_pauses = {x["tracking_start_index"]: x for x in immobile_pauses(links, matching)}
         spikes = loaded["spikes"]
         references = loaded["theta_references"]
         area_index = {x["area"]: i for i, x in enumerate(references)}
@@ -264,7 +275,7 @@ def main(argv=None):
         local_pauses = selected_pauses[selected_pauses.session.eq(session.session)]
         for pause in local_pauses.itertuples(index=False):
             key = {**identity, "pause_id": pause.pause_id}
-            frozen = {"start_s": pause.start_s, "end_s": pause.end_s, "epoch_index": pause.epoch_index}
+            frozen = frozen_native_pause(pause, native_pauses)
             metrics, before, after = matched_run(links, frozen, matching)
             pre = spikes[link_spikes(spikes[:, 0], links, before)]
             ids, totals = np.unique(pre[:, 1].astype(np.int64), return_counts=True)
@@ -274,14 +285,14 @@ def main(argv=None):
             banks = {label: run_bank(spikes, ids, links, mask, clock, phases, supports, p)
                      for label, mask in (("pre", before), ("post", after))}
             saved = {"unit_ids": ids, "unit_theta_reference_index": np.array([unit_areas[int(u)] for u in ids]),
-                     "pause_start_s": np.array(pause.start_s), "pause_end_s": np.array(pause.end_s)}
+                     "pause_start_s": np.array(frozen["start_s"]), "pause_end_s": np.array(frozen["end_s"])}
             fractions = {}
             for label, bank in banks.items():
                 saved.update({f"{label}_{k}": v for k, v in bank.items()})
                 fractions[label] = np.mean(np.isfinite(bank["theta_phase_rad"]), axis=0).tolist() if len(bank["counts"]) else [0.0] * len(references)
             event_count, pair_count = 0, 0
             for candidate in candidates:
-                if candidate["start_s"] < pause.start_s or candidate["end_s"] > pause.end_s:
+                if candidate["start_s"] < frozen["start_s"] or candidate["end_s"] > frozen["end_s"]:
                     continue
                 event_id = f"{session.session}:mua:{candidate['event_index']}"
                 counts, width = event_counts(spikes, ids, candidate["start_s"], candidate["end_s"], matching["order_target_bin_s"])

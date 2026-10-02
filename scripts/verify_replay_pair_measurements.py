@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -88,7 +89,7 @@ def verify(root: Path, dataset_root: Path) -> dict:
     measured = set(events.loc[events["order_measured"], "event_id"])
     if set(pairs["event_id"]) != measured:
         raise ValueError("Measured event/pair accounting mismatch")
-    verified_rows, max_error = 0, 0.0
+    verified_rows, max_error, max_shuffle_error = 0, 0.0, 0.0
     for session_id in p["sessions"]:
         session = load_replay_session(dataset_root / session_id)
         raw = session.excitatory_spikes()
@@ -132,6 +133,9 @@ def verify(root: Path, dataset_root: Path) -> dict:
             hit = raw[(raw[:, 0] >= native.start) & (raw[:, 0] < native.end)]
             bins = np.minimum(n_bins - 1, np.floor((hit[:, 0] - native.start) / width).astype(int))
             by_cell = {int(c): bins[hit[:, 1] == c] for c in np.unique(hit[:, 1])}
+            seed = int.from_bytes(hashlib.sha256(f"{p['seed']}:{identity}".encode()).digest()[:8], "little")
+            rng = np.random.default_rng(seed)
+            inverse_permutations = [np.argsort(rng.permutation(n_bins)) for _ in range(p["order_shuffles"])]
             cells = set(group["cell_a"]) | set(group["cell_b"])
             if len(cells) != row["n_active_eligible_units"] or (group["cell_a"] >= group["cell_b"]).any():
                 raise ValueError("Active-cell pair identity mismatch")
@@ -150,6 +154,13 @@ def verify(root: Path, dataset_root: Path) -> dict:
                     raise ValueError("Original order reconstruction/shuffle-count mismatch")
                 if abs(record.bin_width_s - width) > 1e-12:
                     raise ValueError("Event bin width mismatch")
+                nulls = [reference_order(inv[a], inv[b], width, p["order_min_lag_s"], p["order_max_lag_s"])
+                         for inv in inverse_permutations]
+                shuffle_error = max(abs(np.mean(nulls) - record.shuffle_mean_asymmetry),
+                                    abs(np.std(nulls, ddof=1) - record.shuffle_sd_asymmetry))
+                if not np.isfinite(shuffle_error) or shuffle_error > 1e-12:
+                    raise ValueError("Shuffle summary reconstruction mismatch")
+                max_shuffle_error = max(max_shuffle_error, shuffle_error)
                 verified_rows += 1
     for row in summaries.itertuples():
         if len(pairs[pairs["session"] == row.session]) != row.candidate_pair_rows:
@@ -169,10 +180,12 @@ def verify(root: Path, dataset_root: Path) -> dict:
             "sessions_reconciled": len(p["sessions"]), "pauses_reconciled": len(pauses),
             "contained_candidates_reconciled": len(events),
             "original_pair_scores_independently_reconstructed": verified_rows,
+            "shuffle_pair_summaries_independently_reconstructed": verified_rows,
             "measured_events": len(measured), "max_absolute_original_order_error": max_error,
+            "max_absolute_shuffle_summary_error": max_shuffle_error,
             "theta_control_verified": False, "future_coordination_endpoint_verified": False,
             "biological_association_verified": False, "full_goal_complete": False,
-            "scope": "all measured original pair scores and table accounting; shuffle implementation has separate synthetic invariance tests; RUN exposure matching and phase synchronization are not independently verified here"}
+            "scope": "all measured original pair scores, deterministic whole-bin shuffle means/SDs, native candidate accounting, and hashes; RUN exposure matching and phase synchronization are not independently verified here"}
 
 
 def main() -> int:

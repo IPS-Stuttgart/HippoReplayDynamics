@@ -246,6 +246,7 @@ def test_independent_verifier_reconciles_all_originals_not_biology(verified_fixt
     root, dataset = verified_fixture
     result = verifier.verify(root, dataset)
     assert result["original_pair_scores_independently_reconstructed"] == 1
+    assert result["shuffle_pair_summaries_independently_reconstructed"] == 1
     assert result["measured_events"] == 1
     assert result["sessions_reconciled"] == 1
     assert result["contained_candidates_reconciled"] == 1
@@ -271,7 +272,7 @@ def test_verifier_rejects_unhashed_extra_source(verified_fixture):
         verifier.verify(root, dataset)
 
 
-@pytest.mark.parametrize("problem", ["empty_pairs", "altered_order", "missing_candidate"])
+@pytest.mark.parametrize("problem", ["empty_pairs", "altered_order", "altered_shuffle", "missing_candidate"])
 def test_verifier_rejects_invalid_tables_even_if_hashes_updated(verified_fixture, problem):
     import pandas as pd
     root, dataset = verified_fixture
@@ -279,8 +280,10 @@ def test_verifier_rejects_invalid_tables_even_if_hashes_updated(verified_fixture
     frame = pd.read_csv(root / name)
     if problem in ("empty_pairs", "missing_candidate"):
         frame = frame.iloc[:0]
-    else:
+    elif problem == "altered_order":
         frame.loc[0, "a_before_b_asymmetry"] += .1
+    else:
+        frame.loc[0, "shuffle_mean_asymmetry"] += .1
     frame.to_csv(root / name, index=False)
     refresh_output_hash(root, name)
     with pytest.raises(ValueError):

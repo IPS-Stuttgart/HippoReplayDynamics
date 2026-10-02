@@ -30,18 +30,24 @@ def data():
     return bank, p, t, c, y, selected
 
 
-def test_support_fit_matches_independent_refit_without_changing_target_lag_opportunities():
+@pytest.mark.parametrize("newton", [False, True])
+def test_support_fit_matches_independent_refit_without_changing_target_lag_opportunities(newton):
     bank, p, *_ = data()
+    if newton:
+        p["glm_group_solver"] = "scaled_scipy_lbfgs_newton"
     result, quality = period_endpoint(bank, "pre", p)
-    other, qc = independently_measure_period(bank, "pre", p)
+    other, qc = independently_measure_period(bank, "pre", p, newton_refit=newton)
     np.testing.assert_allclose(result, other, rtol=1e-3, atol=2e-7)
     np.testing.assert_allclose(quality["heldout_poisson_improvement_over_global"], qc["heldout_poisson_improvement_over_global"], rtol=1e-3, atol=2e-5)
     assert quality["physical_lag_opportunities"] == qc["physical_lag_opportunities"]
     assert quality["total_bins"] == len(bank["pre_time_s"]) < quality["training_pool_bins"]
 
 
-def test_added_heldout_block_spikes_do_not_enter_prediction():
+@pytest.mark.parametrize("newton", [False, True])
+def test_added_heldout_block_spikes_do_not_enter_prediction(newton):
     _, p, t, c, y, _ = data()
+    if newton:
+        p["glm_group_solver"] = "scaled_scipy_lbfgs_newton"
     prepared = glm.prepare(t, c, p)
     first = glm.crossfit(y, t, np.zeros(len(t), int), .001, p, c, prepared, return_predictions=True)[2]
     validation = prepared["folds"][0]["validation"]

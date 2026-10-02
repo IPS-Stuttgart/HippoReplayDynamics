@@ -99,9 +99,12 @@ def main(argv=None):
     require(new_protocol.get("rate_training_support") == "same_period_full_run" and
             new_protocol.get("rate_score_comparator") == "matched_target_training_global", "Fixed matched comparator required")
     text = {"protocol_id", "frozen_before", "scope", "rate_model", "source_and_support", "claim_boundary"}
+    require(new_protocol["glm_group_solver"] in (old_protocol["glm_group_solver"], "scaled_scipy_lbfgs_newton"),
+            "Only documented numerical precision may change the solver")
     require(set(new_protocol) - set(old_protocol) == {"rate_training_support", "rate_score_comparator"} and
             set(old_protocol) <= set(new_protocol) and
-            all(new_protocol[k] == old_protocol[k] for k in set(old_protocol) - text), "Model or numeric settings changed")
+            all(new_protocol[k] == old_protocol[k] for k in set(old_protocol) - text - {"glm_group_solver"}),
+            "Model or numeric settings changed")
     require(new_source["input_file_sha256"]["previous_measurement_manifest"] ==
             old_manifest["input_file_sha256"]["measurement_manifest"], "Different original source cohort")
     periods, animals = compare_frames(old, new)

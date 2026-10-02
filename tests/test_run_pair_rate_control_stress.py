@@ -46,3 +46,17 @@ def test_zero_oracle_and_large_nuisance_bias_are_separate_summaries():
     summary = stress.summarize(frame, 20).iloc[0]
     assert summary.systematic_nuisance_bias_detected
     assert not summary.biological_inference and summary.mean_oracle_change == 0
+
+
+def test_positive_out_of_fold_rate_prediction_has_a_separate_quality_screen():
+    frame = pd.DataFrame([{"animal": "A", "session": "S", "pause_id": "P", "period": period,
+        "replicate": j, "heldout_poisson_improvement_over_global": 10.} for period in ("pre", "post") for j in range(20)])
+    summary = stress.predictive_quality(frame, 20)
+    assert summary.rate_prediction_supported.all() and not summary.biological_inference.any()
+
+
+def test_extreme_negative_prediction_is_not_rescued_by_wide_uncertainty():
+    frame = pd.DataFrame([{"animal": "A", "session": "S", "pause_id": "P", "period": "pre",
+        "replicate": j, "heldout_poisson_improvement_over_global": 10. if j else -1e30} for j in range(20)])
+    summary = stress.predictive_quality(frame, 20).iloc[0]
+    assert not summary.rate_prediction_supported

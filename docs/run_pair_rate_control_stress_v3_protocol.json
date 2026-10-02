@@ -1,0 +1,15 @@
+{
+  "protocol_id": "run_pair_rate_control_development_stress_v3_20261002",
+  "seed": 20261002,
+  "replicates": 200,
+  "cells_per_pause": 8,
+  "base_rate_hz": 15.0,
+  "theta_concentration": 1.25,
+  "post_even_cell_phase_shift_rad": 1.5707963267948966,
+  "pause_selection": "Same earliest qualified pause per animal and first eight source-identified units as v1 and v2; no substitutions",
+  "generator": "Unchanged conditional independent Poisson generator, native theta, phase preference shifts, per-pause seeds, support and clock gaps. No interactions or replay-driven changes. This bank is development, not independent validation.",
+  "comparison": "Bounded-speed v3 GLM versus exact-intensity oracle on identical counts and physical support. Missing/nonconverged predictions stop the run; independent numerical verification tolerances are not relaxed.",
+  "predictive_quality": "Across each of the fixed eight animal/period groups, require the Bonferroni-corrected 95% Monte Carlo interval for mean heldout Poisson improvement over a training-only global-rate comparator to be wholly positive. Any unsupported period is rate_prediction_failed, even if no pair-bias interval excludes zero. Report estimator spread as well as mean bias; absence of detectable bias is not equivalence or adequate power.",
+  "summary": "Same fixed 112 pair-discrepancy family, 200 draws and simultaneous Monte Carlo intervals as v1. Pairs are dependent, not biological subjects.",
+  "claim_boundary": "Development only. Require separate six-generator full-procedure validation, validated replay, preceding-coordination adjustment and animal-level shuffle inference before association interpretation. PF native theta remains missing."
+}

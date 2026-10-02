@@ -60,6 +60,24 @@ def summarize(frame, replicas):
     return pd.DataFrame(rows)
 
 
+def predictive_quality(frame, replicas):
+    groups = frame.groupby(["animal", "session", "pause_id", "period"], sort=True)
+    check(len(groups) > 0, "Empty predictive-quality family")
+    critical = t.ppf(1 - .05 / (2 * len(groups)), replicas - 1)
+    rows = []
+    for identity, d in groups:
+        check(len(d) == replicas and d.replicate.nunique() == replicas, "Incomplete predictive-quality draws")
+        score = d.heldout_poisson_improvement_over_global
+        check(np.isfinite(score).all(), "Nonfinite heldout rate scores")
+        half = float(critical * score.std(ddof=1) / np.sqrt(replicas))
+        rows.append({**dict(zip(["animal", "session", "pause_id", "period"], identity, strict=True)),
+            "replicates": replicas, "mean_heldout_improvement_over_global": float(score.mean()),
+            "simultaneous_mc_interval_low": float(score.mean() - half),
+            "simultaneous_mc_interval_high": float(score.mean() + half),
+            "rate_prediction_supported": bool(score.mean() - half > 0), "biological_inference": False})
+    return pd.DataFrame(rows)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint-dir", type=Path, required=True)
@@ -164,11 +182,14 @@ def main(argv=None):
                           "cells": n, "replicates": p["replicates"]})
     frame = pd.DataFrame(rows)
     summary = summarize(frame, p["replicates"])
+    rate_summary = predictive_quality(pd.DataFrame(fit_rows), p["replicates"])
     outputs = {"replicates.csv": frame, "pair_stress_summary.csv": summary,
-               "inventory.csv": pd.DataFrame(inventory), "fit_quality.csv": pd.DataFrame(fit_rows)}
+               "inventory.csv": pd.DataFrame(inventory), "fit_quality.csv": pd.DataFrame(fit_rows),
+               "rate_prediction_summary.csv": rate_summary}
     for name, output in outputs.items():
         output.to_csv(args.output_dir / name, index=False)
     biased = int(summary.systematic_nuisance_bias_detected.sum())
+    prediction_failed = int((~rate_summary.rate_prediction_supported).sum())
     result = {**provenance, "protocol_id": p["protocol_id"], "replicates_per_animal": p["replicates"],
               "rate_model_family": estimator.get("rate_model_family", "joint_stratum"),
               "all_crossfit_predictions_required": True,
@@ -176,7 +197,9 @@ def main(argv=None):
                   **{k: version(k) for k in ("numpy", "scipy", "pandas", "scikit-learn")}},
               "selected_animals": len(inventory), "fixed_animal_pair_family": len(summary),
               "biased_animal_pairs": biased,
-              "development_stress_status": "nuisance_bias_detected" if biased else "no_bias_detected_in_this_generator",
+              "rate_prediction_failed_periods": prediction_failed,
+              "development_stress_status": "rate_prediction_failed" if prediction_failed else
+                  ("nuisance_bias_detected" if biased else "no_bias_detected_in_this_generator"),
               "association_fit": False, "full_procedure_calibrated": False, "goal_complete": False,
               "outputs_sha256": {name: file_sha256(args.output_dir / name) for name in outputs},
               "created_at_utc": datetime.now(timezone.utc).isoformat()}

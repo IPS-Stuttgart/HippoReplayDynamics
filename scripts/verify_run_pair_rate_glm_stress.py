@@ -47,8 +47,12 @@ def features(training, target, p):
             for h in range(1, p["glm_direction_harmonics"] + 1) for fun in (np.sin, np.cos)]).T
         theta = np.array([fun(h * data["theta"][:, k]) for k in range(data["theta"].shape[1])
             for h in range(1, p["glm_theta_harmonics"] + 1) for fun in (np.sin, np.cos)]).T
-        scale = max(float(np.std(np.log(training["speed"]))), .1)
-        speed = (np.log(data["speed"]) - np.mean(np.log(training["speed"]))) / scale
+        if p.get("glm_speed_scaling", "training_standardized_log") == "fixed_log_run_bounds":
+            low, high = np.log(p["speed_edges_cm_s"][0]), np.log(p["speed_edges_cm_s"][-1])
+            speed = (np.log(data["speed"]) - low) / ((high - low) / 2) - 1
+        else:
+            scale = max(float(np.std(np.log(training["speed"]))), .1)
+            speed = (np.log(data["speed"]) - np.mean(np.log(training["speed"]))) / scale
         blocks = [spatial, sparse.csr_matrix(direction), sparse.csr_matrix(theta),
                   sparse.csr_matrix(np.array([speed**i for i in range(1, p["glm_speed_degree"] + 1)]).T)]
         if p["glm_spatial_direction_interaction"]:
@@ -137,6 +141,9 @@ def main(argv=None):
         check(len(fold) == p["crossfit_folds"] and all(f["status"] == "predicted" and
               f["all_cells_converged"] and f["max_fit_iterations"] < p["glm_max_iter"] for f in fold),
               "Incomplete or nonconverged fit")
+        if p.get("glm_speed_scaling") == "fixed_log_run_bounds":
+            check(all(f["maximum_target_feature_absolute_value"] <= 1 + 1e-12 for f in fold),
+                  "Supposedly bounded features extrapolated")
     np.testing.assert_allclose(frame.discrepancy, frame.fitted_change - frame.oracle_change, rtol=1e-12, atol=1e-12)
     critical = t.ppf(1 - .05 / (2 * len(summary)), stress["replicates"] - 1)
     computed = frame.groupby(identity, sort=True).discrepancy.agg(["mean", "std", "count"])
@@ -149,6 +156,27 @@ def main(argv=None):
     flags = (computed["mean"] - half > 0) | (computed["mean"] + half < 0)
     check(np.array_equal(saved.systematic_nuisance_bias_detected, flags) and
           int(flags.sum()) == manifest["biased_animal_pairs"], "Bias decision differs")
+    predictive_periods = None
+    if "rate_prediction_summary.csv" in manifest["outputs_sha256"]:
+        rate_keys = ["animal", "session", "pause_id", "period"]
+        rate_saved = pd.read_csv(root / "rate_prediction_summary.csv").set_index(rate_keys)
+        rate_computed = fits.groupby(rate_keys).heldout_poisson_improvement_over_global.agg(["mean", "std", "count"])
+        check(rate_saved.index.is_unique and set(rate_saved.index) == set(rate_computed.index), "Changed rate-quality family")
+        rate_saved = rate_saved.loc[rate_computed.index]
+        check(np.isfinite(fits.heldout_poisson_improvement_over_global).all(), "Nonfinite predictive scores")
+        check((rate_computed["count"] == stress["replicates"]).all(), "Incomplete predictive draws")
+        rate_critical = t.ppf(1 - .05 / (2 * len(rate_computed)), stress["replicates"] - 1)
+        half = rate_critical * rate_computed["std"] / np.sqrt(stress["replicates"])
+        np.testing.assert_allclose(rate_saved.mean_heldout_improvement_over_global, rate_computed["mean"], rtol=1e-12)
+        np.testing.assert_allclose(rate_saved.simultaneous_mc_interval_low, rate_computed["mean"] - half, rtol=1e-12)
+        np.testing.assert_allclose(rate_saved.simultaneous_mc_interval_high, rate_computed["mean"] + half, rtol=1e-12)
+        supported = rate_computed["mean"] - half > 0
+        check(np.array_equal(rate_saved.rate_prediction_supported, supported), "Predictive-quality decision differs")
+        predictive_periods = int((~supported).sum())
+        check(manifest["rate_prediction_failed_periods"] == predictive_periods, "Missing failed predictive periods")
+        status = "rate_prediction_failed" if predictive_periods else (
+            "nuisance_bias_detected" if flags.any() else "no_bias_detected_in_this_generator")
+        check(manifest["development_stress_status"] == status, "Predictive failure was called a pass")
     previous = None
     if args.previous_stress_dir is not None:
         old = json.loads((args.previous_stress_dir / "manifest.json").read_text())
@@ -218,6 +246,7 @@ def main(argv=None):
     check(provenance["git_dirty"] is False, "Clean committed verifier checkout required")
     result = {**provenance, "verified": True, "replica_rows_accounted": len(frame),
         "summary_rows_accounted": len(summary), "fit_rows_accounted": len(fits), "first_replicates": checks,
+        "rate_prediction_failed_periods": predictive_periods,
         "paired_revision_comparison": previous,
         "scope": "All hashes, fit completeness, fixed pair counts, discrepancy arithmetic and Monte Carlo intervals; independently regenerated/fitted only first replica per animal using SciPy B-splines, direct Poisson loss and FFT. Not all random draws, a biological model, or full null calibration.",
         "association_fit": False, "full_procedure_calibrated": False, "goal_complete": False}

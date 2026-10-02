@@ -27,9 +27,11 @@ def identity(times, covariates, p):
 
 
 def design(train, target, p):
-    """Every knot, speed scaling and pseudocount feature comes from training only."""
+    """Learn transforms from training only; fixed speed bounds come from protocol."""
     axes = []
     outside = np.zeros(len(target["position"]), bool)
+    outside_speed = ((target["speed"] < train["speed"].min()) |
+                     (target["speed"] > train["speed"].max()))
     for k in (0, 1):
         a, b = train["position"][:, k], target["position"][:, k]
         spacing = p["glm_position_knot_cm"]
@@ -52,8 +54,12 @@ def design(train, target, p):
         theta = np.column_stack([f(h * data["theta"][:, k]) for k in range(data["theta"].shape[1])
                                  for h in range(1, p["glm_theta_harmonics"] + 1) for f in (np.sin, np.cos)])
         log_speed = np.log(data["speed"])
-        train_speed = np.log(train["speed"])
-        scaled = (log_speed - train_speed.mean()) / max(float(train_speed.std()), .1)
+        if p.get("glm_speed_scaling", "training_standardized_log") == "fixed_log_run_bounds":
+            low, high = np.log(np.asarray(p["speed_edges_cm_s"])[[0, -1]])
+            scaled = 2 * (log_speed - low) / (high - low) - 1
+        else:
+            train_speed = np.log(train["speed"])
+            scaled = (log_speed - train_speed.mean()) / max(float(train_speed.std()), .1)
         speed = np.column_stack([scaled**k for k in range(1, p["glm_speed_degree"] + 1)])
         features = [spatial, sparse.csr_matrix(direction), sparse.csr_matrix(theta), sparse.csr_matrix(speed)]
         if p["glm_spatial_direction_interaction"]:
@@ -63,7 +69,9 @@ def design(train, target, p):
                             for k in range(data["theta"].shape[1]) for j in (0, 1))
         blocks.append(sparse.hstack(features, format="csr"))
     return blocks[0], blocks[1], {"spatial_features": spatial_columns, "features": blocks[0].shape[1],
-                                  "outside_training_spatial_range_fraction": float(outside.mean())}
+        "outside_training_spatial_range_fraction": float(outside.mean()),
+        "outside_training_speed_range_fraction": float(outside_speed.mean()),
+        "maximum_target_feature_absolute_value": float(np.max(np.abs(blocks[1].data)))}
 
 
 def prepare(times, covariates, p):
@@ -80,6 +88,8 @@ def prepare(times, covariates, p):
             np.all(covariates["speed"] <= p["speed_edges_cm_s"][-1]), "RUN speed outside frozen bounds")
     require(p["crossfit_folds"] >= 2 and p["crossfit_guard_s"] >= p["lag_max_s"] and
             p["crossfit_time_block_s"] > 2 * p["crossfit_guard_s"], "Invalid guarded crossfit")
+    require(p.get("glm_speed_scaling", "training_standardized_log") in
+            ("training_standardized_log", "fixed_log_run_bounds"), "Unknown GLM speed scaling")
     require(all(np.isfinite(p[k]) and p[k] > 0 for k in
                 ("glm_position_knot_cm", "glm_l2_penalty", "glm_tolerance", "mean_count_floor")),
             "Finite positive GLM spacing, penalty, tolerance and count floor required")
@@ -158,5 +168,7 @@ def crossfit(counts, times, labels, width, p, covariates, prepared=None):
                          - means[usable] + global_means[usable])) if usable.any() else np.nan
     return (counts - means) / np.sqrt(means), {"rate_model_family": "smooth_poisson_glm", "folds": diagnostics,
         "predicted_bins": int(usable.sum()), "total_bins": len(times),
+        "predicted_mean_count_min": float(means[usable].min()) if usable.any() else np.nan,
+        "predicted_mean_count_max": float(means[usable].max()) if usable.any() else np.nan,
         "unseen_stratum_fraction": float((~seen[usable]).mean()) if usable.any() else np.nan,
         "unseen_joint_strata_use_glm_not_global_fallback": True, "heldout_poisson_improvement_over_global": delta}

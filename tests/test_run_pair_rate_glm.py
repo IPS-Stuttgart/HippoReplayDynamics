@@ -141,3 +141,14 @@ def test_invalid_glm_settings_fail_before_fitting(key, value):
     times = np.arange(.0005, 20, .001)
     with pytest.raises(ValueError, match="GLM"):
         glm.prepare(times, covariates(times), {**protocol(), key: value})
+
+
+def test_fixed_speed_domain_cannot_explode_when_target_speed_exceeds_training_range():
+    times = np.arange(.0005, 20, .001)
+    train, target = covariates(times[:10000]), covariates(times[10000:])
+    target["speed"][:] = 200
+    p = {**protocol(), "glm_speed_scaling": "fixed_log_run_bounds"}
+    x, z, qc = glm.design(train, target, p)
+    assert np.max(np.abs(x.data)) <= 1 + 1e-12 and np.max(np.abs(z.data)) <= 1 + 1e-12
+    assert qc["outside_training_speed_range_fraction"] == 1
+    assert qc["maximum_target_feature_absolute_value"] <= 1 + 1e-12

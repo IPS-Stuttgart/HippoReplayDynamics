@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts import _run_pair_rate_glm as producer
 from scripts import verify_run_pair_rate_glm_stress as verifier
@@ -20,14 +21,16 @@ def covariates(times):
                                       np.mod(2 * np.pi * 8 * times + .4, 2 * np.pi) - np.pi))}
 
 
-def test_independent_scipy_basis_matches_position_phase_direction_and_speed_features():
+@pytest.mark.parametrize("scaling", ["training_standardized_log", "fixed_log_run_bounds"])
+def test_independent_scipy_basis_matches_position_phase_direction_and_speed_features(scaling):
     times = np.arange(.0005, 20, .001)
     train, target = covariates(times[:10000]), covariates(times[10000:])
     target["position"][::100] += 100
     train["speed"] += np.sin(times[:10000])
     target["speed"] += np.sin(times[10000:])
-    a, b, _ = producer.design(train, target, protocol())
-    x, z = verifier.features(train, target, protocol())
+    p = {**protocol(), "glm_speed_scaling": scaling}
+    a, b, _ = producer.design(train, target, p)
+    x, z = verifier.features(train, target, p)
     np.testing.assert_allclose(x.toarray(), a.toarray(), rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(z.toarray(), b.toarray(), rtol=1e-12, atol=1e-12)
 

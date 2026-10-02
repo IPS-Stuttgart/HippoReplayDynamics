@@ -146,7 +146,7 @@ def curated_units(times: np.ndarray, keep: np.ndarray, labels: np.ndarray,
     hits = labels > 0
     ids = tetrode * 65536 + labels[hits].astype(np.int64)
     spikes = np.column_stack((filtered[hits], ids))
-    rows = [{"unit_id": int(tetrode * 65536 + cluster),
+    rows = [{"unit_id": tetrode * 65536 + int(cluster),
              "tetrode_zero_based": tetrode, "cluster_id": int(cluster),
              "retained_spikes": int(np.sum(labels == cluster)),
              "identity_verified": True, "cell_type": "not_assumed_from_spatial_firing"}

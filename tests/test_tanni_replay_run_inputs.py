@@ -32,6 +32,13 @@ def test_empty_and_zero_clusters_do_not_create_units():
     assert spikes.shape == (0, 2) and not units
 
 
+def test_release_int16_labels_do_not_overflow_stable_ids():
+    spikes, units = audit.curated_units(np.asarray([1., 2.]), np.asarray([True, True]),
+                                       np.asarray([2, 300], dtype=np.int16), 31)
+    assert [row["unit_id"] for row in units] == [31 * 65536 + 2, 31 * 65536 + 300]
+    np.testing.assert_array_equal(spikes[:, 1], [31 * 65536 + 2, 31 * 65536 + 300])
+
+
 @pytest.mark.parametrize("times", [[1, 0], [1, np.nan]])
 def test_bad_spike_chronology_not_repaired(times):
     with pytest.raises(ValueError):

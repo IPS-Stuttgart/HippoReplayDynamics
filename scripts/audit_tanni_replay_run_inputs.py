@@ -13,7 +13,6 @@ from itertools import combinations
 import json
 from pathlib import Path
 import subprocess
-import sys
 
 import h5py
 import numpy as np

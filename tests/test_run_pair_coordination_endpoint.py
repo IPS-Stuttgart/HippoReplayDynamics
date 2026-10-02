@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from scripts import measure_run_pair_coordination_endpoint as endpoint
+from scripts import verify_run_pair_coordination_endpoint as verifier
 
 
 def protocol():
@@ -144,3 +145,33 @@ def test_unseen_covariate_strata_are_reported_not_dropped():
     residual, qc = endpoint.crossfit_rates(np.zeros((len(times), 2), int), times, labels, .001, protocol())
     assert qc["unseen_stratum_fraction"] == 1
     assert qc["predicted_bins"] == len(times) and np.isfinite(residual).all()
+
+
+def test_independent_grouped_rate_verifier_agrees_with_producer():
+    times = np.arange(.0005, 20, .001)
+    p = protocol()
+    bank = make_period_bank("pre", times)
+    rng = np.random.default_rng(9)
+    bank["pre_counts"] = rng.poisson(.03, size=(len(times), 2))
+    bank["pre_position_cm"][:, 0] = rng.integers(0, 4, size=len(times)) * 8
+    bank["pre_theta_phase_rad"][:, 0] = rng.uniform(-np.pi, np.pi, size=len(times))
+    bank["pre_theta_phase_rad"][:100, 0] = np.nan
+    valid = np.isfinite(bank["pre_theta_phase_rad"]).all(axis=1)
+    labels = endpoint.strata(bank["pre_position_cm"][valid], bank["pre_direction_rad"][valid],
+                             bank["pre_speed_cm_s"][valid], bank["pre_theta_phase_rad"][valid], p)
+    expected, qc = endpoint.crossfit_rates(bank["pre_counts"][valid], times[valid], labels, .001, p)
+    actual, actual_times, actual_qc = verifier.independent_residuals(bank, "pre", p)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_array_equal(actual_times, times[valid])
+    assert actual_qc["folds"] == qc["folds"]
+    assert actual_qc["unseen_stratum_fraction"] == qc["unseen_stratum_fraction"]
+
+
+def test_independent_fft_verifier_preserves_gaps_and_coordination_sign():
+    times = np.r_[np.arange(.2, .209, .001), np.arange(.4, .408, .001)]
+    residual = np.random.default_rng(7).normal(size=(len(times), 3))
+    p = {**protocol(), "lag_min_s": .002, "lag_max_s": .006}
+    expected, opportunities = endpoint.residual_coordination(residual, times, .001, .002, .006)
+    actual, actual_opportunities = verifier.independent_coordination(residual, times, p)
+    assert actual_opportunities == opportunities
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)

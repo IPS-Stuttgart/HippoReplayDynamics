@@ -92,3 +92,18 @@ def test_amended_inventory_is_independently_verified_against_raw_mat_edges(tmp_p
     saved = json.loads((tmp_path / "output/odor_place_post_error_verification.json").read_text())
     assert saved["raw_source_reconciliation"]["status"] == "verified_against_raw_digital_edges"
     assert saved["raw_source_reconciliation"]["verified_trials"] == 2
+
+
+def test_missing_dio_epochs_remain_explicitly_unverified(tmp_path):
+    from tests import test_odor_place_original_source_audit as original
+    from scripts.odor_place_original_source_audit import verify_raw_trials
+    original.test_real_mat_zip_inventory_and_saved_accounting(tmp_path)
+    saved = json.loads((tmp_path / "output/odor_place_post_error_source_sensor_checkpoints.json").read_text())
+    rows = saved[0]["source_sensor_trials"]
+    missing = {"animal": "CS31", "source_day": 1, "source_epoch": 3, "trial_verified": False}
+    archive = tmp_path / "dataset/Figure1-6.zip"
+    result = verify_raw_trials(archive, rows + [missing], AMENDED)
+    assert result["verified_trials"] == 2
+    assert result["unresolved_epochs_retained"][0]["missing_roles"] == ["DIO", "odorTriggers"]
+    with pytest.raises(ValueError, match="verified trial lacks"):
+        verify_raw_trials(archive, rows + [{**missing, "trial_verified": True}], AMENDED)

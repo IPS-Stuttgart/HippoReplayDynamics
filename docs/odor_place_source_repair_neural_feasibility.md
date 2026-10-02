@@ -70,7 +70,7 @@ supervisor survives SSH loss and records progress, logs and terminal exit status
 
 ```bash
 python scripts/launch_odor_place_feasibility.py \
-  --job-dir /home/florianpfaff/odor-place-jobs/20261002-source-repair-v1 \
+  --job-dir /home/florianpfaff/odor-place-jobs/20261002-source-repair-v2 \
   --stages inventory verify acquire-neural run-qc verify report -- \
   audit_odor_place_post_error_feasibility.py \
   --dataset-root /home/florianpfaff/datasets/dandi001539-odor-place/original-v3 \
@@ -78,7 +78,7 @@ python scripts/launch_odor_place_feasibility.py \
   --reference-inventory /home/florianpfaff/odor-place-results/20261001-feasibility-v1 \
   --previous-audit /home/florianpfaff/odor-place-results/20261001-source-v3-audit \
   --protocol docs/odor_place_source_v3_neural_feasibility_protocol.json \
-  --output-dir /home/florianpfaff/odor-place-results/20261002-source-repair-v1
+  --output-dir /home/florianpfaff/odor-place-results/20261002-source-repair-v2
 ```
 
 The home filesystem, not Lexar, holds conditional acquisitions. Space checks

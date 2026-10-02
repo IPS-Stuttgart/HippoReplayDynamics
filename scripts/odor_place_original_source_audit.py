@@ -671,7 +671,7 @@ def verify_raw_trials(archive_path, rows, protocol):
     grouped = {}
     for row in rows:
         grouped.setdefault((row["animal"], row["source_day"], row["source_epoch"]), []).append(row)
-    passed, zero_count, members = 0, 0, {}
+    passed, zero_count, members, unresolved = 0, 0, {}, []
     with zipfile.ZipFile(archive_path) as archive:
         for entry in archive.infolist():
             match = re.fullmatch(r"(CS\d+)(DIO|odorTriggers)(\d+)\.mat", PurePosixPath(entry.filename).name)
@@ -685,6 +685,13 @@ def verify_raw_trials(archive_path, rows, protocol):
             members[(animal, day, role)] = epochs(loadmat(io.BytesIO(archive.read(entry)), struct_as_record=False,
                                                          squeeze_me=False, variable_names=[variable])[variable], day)
         for (animal, day, epoch), trials in grouped.items():
+            missing = [role for role in ["DIO", "odorTriggers"] if epoch not in members.get((animal, day, role), {})]
+            if missing:
+                if any(r["trial_verified"] for r in trials):
+                    raise ValueError("A verified trial lacks its raw source sensor record")
+                unresolved.append({"animal": animal, "source_day": day, "source_epoch": epoch,
+                                   "missing_roles": missing, "n_unverified_samples_retained": len(trials)})
+                continue
             dio = members[(animal, day, "DIO")][epoch]
             annotation = struct(members[(animal, day, "odorTriggers")][epoch])
             raw = {}
@@ -733,8 +740,10 @@ def verify_raw_trials(archive_path, rows, protocol):
                 if row["task_correct"] != (row["chosen_arm"] == row["cue"]):
                     raise ValueError("Independent task-rule outcome differs")
                 passed += 1
+    if passed != sum(r["trial_verified"] for r in rows):
+        raise ValueError("Independent raw verification did not account for every verified trial")
     return {"status": "verified_against_raw_digital_edges", "verified_trials": passed,
-            "zero_duration_pulses_observed": zero_count, "parser_reused": False}
+            "zero_duration_pulses_observed": zero_count, "unresolved_epochs_retained": unresolved, "parser_reused": False}
 
 
 def report(args, protocol):

@@ -119,7 +119,7 @@ def prepare(times, covariates, p):
     return {"identity": identity(times, covariates, p), "folds": prepared}
 
 
-def crossfit(counts, times, labels, width, p, covariates, prepared=None):
+def crossfit(counts, times, labels, width, p, covariates, prepared=None, *, return_predictions=False):
     require(covariates is not None, "GLM requires actual position/direction/speed/LFP theta covariates")
     counts, times, labels = np.asarray(counts), np.asarray(times, float), np.asarray(labels, int)
     require(counts.ndim == 2 and len(counts) == len(times) == len(labels) and counts.shape[1] > 0,
@@ -166,9 +166,13 @@ def crossfit(counts, times, labels, width, p, covariates, prepared=None):
     usable = np.isfinite(means).all(axis=1)
     delta = float(np.sum(xlogy(counts[usable], means[usable] / global_means[usable])
                          - means[usable] + global_means[usable])) if usable.any() else np.nan
-    return (counts - means) / np.sqrt(means), {"rate_model_family": "smooth_poisson_glm", "folds": diagnostics,
+    residual = (counts - means) / np.sqrt(means)
+    diagnostics = {"rate_model_family": "smooth_poisson_glm", "folds": diagnostics,
         "predicted_bins": int(usable.sum()), "total_bins": len(times),
         "predicted_mean_count_min": float(means[usable].min()) if usable.any() else np.nan,
         "predicted_mean_count_max": float(means[usable].max()) if usable.any() else np.nan,
         "unseen_stratum_fraction": float((~seen[usable]).mean()) if usable.any() else np.nan,
         "unseen_joint_strata_use_glm_not_global_fallback": True, "heldout_poisson_improvement_over_global": delta}
+    if return_predictions:
+        return residual, diagnostics, means, global_means
+    return residual, diagnostics

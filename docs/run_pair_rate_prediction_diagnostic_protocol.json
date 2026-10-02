@@ -1,0 +1,17 @@
+{
+  "protocol_id": "run_pair_rate_prediction_diagnostic_v1_20261002",
+  "seed": 20261002,
+  "frozen_before": "Any biological replay-order association; responds to negative real RUN predictive scores in 23 of 26 bounded-v3 periods",
+  "scope": "RUN-only development diagnostic, not estimator selection, endpoint certification or biological calibration",
+  "cells_per_pause": 8,
+  "cell_rule": "First eight unit IDs in the existing frozen bank order, unchanged between candidates and PRE/POST; no spike-count, prediction-quality or outcome ranking",
+  "pause_rule": "Every pause in the independently verified source cohort; preserve the three frozen theta-screen failures without replacement",
+  "position_knot_cm": [16.0, 32.0],
+  "l2_penalties": [1.0, 10.0, 100.0],
+  "interaction_modes": ["full", "additive"],
+  "unchanged": "Original physical RUN clocks, theta references and missingness, position/direction/speed covariates, 5-second guarded two-fold crossfit, zero-spike bins, 60-ms guard, bounded log-speed scaling, likelihood, pseudocount and convergence tolerance",
+  "readout": "Held-out Poisson score relative to the training-only global-rate model, retained separately for every fixed cell and period. Report model dimension, training spike support, prediction range and extrapolation. PRE/POST quality is not a biological change result.",
+  "selection": "Report every candidate. Do not select a winner, fit replay associations, drop unfavorable periods or authorize inference from the best candidate. Any future estimator selection must be training-only and separately calibrated.",
+  "required_full_calibration": ["no_update", "rate_only_drift", "shared_theta_input", "existing_coordination_only", "order_specific_update", "regression_to_mean"],
+  "claim_boundary": "Neither improved rate prediction on eight cells nor numerical agreement proves unbiased coordination changes or replay-induced plasticity. The original PF goal and independent replay validation remain unfinished."
+}

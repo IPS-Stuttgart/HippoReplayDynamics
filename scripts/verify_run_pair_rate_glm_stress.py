@@ -13,6 +13,7 @@ from scipy import sparse
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize
 from scipy.special import iv
+from scipy.sparse.linalg import spsolve
 from scipy.stats import t
 
 try:
@@ -64,7 +65,43 @@ def features(training, target, p):
     return matrices
 
 
-def independent_residuals(counts, times, covariates, p, *, return_prediction=False):
+def poisson_newton_refinement(coefficient, x, y, weight, penalty):
+    """Resolve loss-roundoff termination using the same convex Poisson objective."""
+    coefficient = coefficient.copy()
+    penalty = np.broadcast_to(penalty, x.shape[1])
+    for _ in range(12):
+        eta = np.asarray(x @ coefficient[:-1]).ravel() + coefficient[-1]
+        mu = np.exp(eta)
+        error = weight * (mu - y)
+        gradient = np.r_[np.asarray(x.T @ error).ravel() + penalty * coefficient[:-1], error.sum()]
+        maximum = np.max(np.abs(gradient))
+        check(np.isfinite(maximum), "Nonfinite Newton gradient")
+        if maximum <= 1e-13:
+            return coefficient
+        curvature = weight * mu
+        cross = sparse.csr_matrix(np.asarray(x.T @ curvature).reshape(-1, 1))
+        hessian = sparse.bmat([[x.T @ x.multiply(curvature[:, None]) + sparse.diags(penalty), cross],
+                              [cross.T, sparse.csr_matrix([[curvature.sum()]])]], format="csc")
+        step = spsolve(hessian, gradient)
+        check(np.isfinite(step).all(), "Nonfinite Newton step")
+        loss = weight @ (mu - y * eta) + penalty @ (coefficient[:-1] ** 2) / 2
+        accepted = False
+        for scale in (1., .5, .25, .125, .0625):
+            candidate = coefficient - scale * step
+            candidate_eta = np.asarray(x @ candidate[:-1]).ravel() + candidate[-1]
+            candidate_mu = np.exp(candidate_eta)
+            candidate_error = weight * (candidate_mu - y)
+            candidate_gradient = np.r_[np.asarray(x.T @ candidate_error).ravel() + penalty * candidate[:-1], candidate_error.sum()]
+            candidate_loss = weight @ (candidate_mu - y * candidate_eta) + penalty @ (candidate[:-1] ** 2) / 2
+            slack = 8 * np.finfo(float).eps * max(abs(loss), 1e-20)
+            if np.isfinite(candidate_loss) and candidate_loss <= loss + slack and np.max(np.abs(candidate_gradient)) < maximum:
+                coefficient, accepted = candidate, True
+                break
+        check(accepted, "Newton refinement did not reduce gradient with nonincreasing loss")
+    raise ValueError("Newton refinement failed the fixed 1e-13 gradient criterion")
+
+
+def independent_residuals(counts, times, covariates, p, *, return_prediction=False, newton_refit=False):
     """Direct weighted Poisson objective; no producer rate fitting or cached design."""
     prediction = np.full(counts.shape, np.nan)
     block = np.floor(times / p["crossfit_time_block_s"]).astype(int)
@@ -106,7 +143,9 @@ def independent_residuals(counts, times, covariates, p, *, return_prediction=Fal
                          "gtol": 1e-11 if "glm_main_effect_l2_penalty" in p else 1e-9,
                          "ftol": (4 if "glm_main_effect_l2_penalty" in p else 64) * np.finfo(float).eps})
             check(result.success, f"Independent Poisson fit failed: {result.message}")
-            return np.exp(np.asarray(z @ result.x[:-1]).ravel() + result.x[-1])
+            coefficient = (poisson_newton_refinement(result.x, x, y, weight, penalty)
+                           if newton_refit else result.x)
+            return np.exp(np.asarray(z @ coefficient[:-1]).ravel() + coefficient[-1])
         with ThreadPoolExecutor(max_workers=p["glm_workers"]) as pool:
             prediction[target] = np.column_stack(list(pool.map(fit_cell, range(counts.shape[1]))))
     check(np.isfinite(prediction).all(), "Incomplete independently fitted predictions")

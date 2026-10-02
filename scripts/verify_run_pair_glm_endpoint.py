@@ -40,7 +40,7 @@ def global_predictions(counts, times, p):
     return prediction
 
 
-def independently_measure_period(bank, period, p):
+def independently_measure_period(bank, period, p, *, newton_refit=False):
     phase = np.asarray(bank[f"{period}_theta_phase_rad"])
     check(phase.ndim == 2 and phase.shape[1] > 0, "Missing native theta references")
     valid = np.isfinite(phase).all(axis=1)
@@ -68,11 +68,13 @@ def independently_measure_period(bank, period, p):
         check(np.array_equal(pool_counts[target], counts), "Endpoint spikes changed")
         for key in covariates:
             check(np.array_equal(pool_covariates[key][target], covariates[key]), "Endpoint covariates changed")
-        residual, mean = independent_residuals(pool_counts, pool_times, pool_covariates, p, return_prediction=True)
+        residual, mean = independent_residuals(pool_counts, pool_times, pool_covariates, p,
+                                              return_prediction=True, newton_refit=newton_refit)
         baseline = global_predictions(counts, times, p)
         residual, mean = residual[target], mean[target]
     else:
-        residual, mean = independent_residuals(counts, times, covariates, p, return_prediction=True)
+        residual, mean = independent_residuals(counts, times, covariates, p,
+                                              return_prediction=True, newton_refit=newton_refit)
         baseline = global_predictions(counts, times, p)
     matrix, opportunities = independent_coordination(residual, times, p)
     improvement = float(np.sum(xlogy(counts, mean / baseline) - mean + baseline))
@@ -88,6 +90,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--newton-refit", action="store_true", help="Refine every independent fit to a 1e-13 gradient; unchanged objective and endpoint tolerances")
     args = parser.parse_args(argv)
     check(not args.output.exists(), "Do not overwrite a verification artifact")
     root = args.endpoint_dir
@@ -152,7 +155,7 @@ def main(argv=None):
             selected = selected.set_index(["unit_a", "unit_b"]).loc[list(zip(ids[a], ids[b], strict=True))]
             for period in ("pre", "post"):
                 check(quality.loc[(*key, period), "status"] == "measured", "Unmeasured period used")
-                matrix, qc = independently_measure_period(bank, period, p)
+                matrix, qc = independently_measure_period(bank, period, p, newton_refit=args.newton_refit)
                 recorded = quality.loc[(*key, period)]
                 for name in ("source_bins", "usable_bins", "predicted_bins", "total_bins", "physical_lag_opportunities"):
                     check(recorded[name] == qc[name], f"RUN support differs: {name}")
@@ -176,6 +179,7 @@ def main(argv=None):
         "measured_pauses": len(period_audit) // 2, "unavailable_pauses": unavailable,
         "period_audit": period_audit,
         "method": "Independent SciPy B-splines, direct Poisson optimization and FFT physical-lag endpoints",
+        "independent_newton_refinement": args.newton_refit,
         "scope": "Every available real RUN endpoint independently refitted; unavailable pauses retained but not numerically certified. Not replay validation, full null calibration or association.",
         "association_verified": False, "biological_calibration_verified": False, "goal_complete": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)

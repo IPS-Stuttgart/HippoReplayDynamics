@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from scripts import _run_pair_rate_glm as glm
-from scripts.measure_run_pair_coordination_endpoint import period_endpoint, support_pool
+from scripts.measure_run_pair_coordination_endpoint import matched_global_predictions, period_endpoint, support_pool
 from scripts.measure_tanni_replay_run_coordination import assert_previous_bank, support_run_masks
 from scripts.verify_run_pair_glm_endpoint import independently_measure_period
 
@@ -55,6 +55,15 @@ def test_added_heldout_block_spikes_do_not_enter_prediction():
             assert not np.any(item["training"] & (t >= block * 5 - .06) & (t < (block + 1) * 5 + .06))
 
 
+def test_matched_global_comparator_equals_original_target_only_glm_baseline():
+    _, p, t, c, y, selected = data()
+    target_times, target_counts = t[selected], y[selected]
+    target_covariates = {k: v[selected] for k, v in c.items()}
+    original = glm.crossfit(target_counts, target_times, np.zeros(selected.sum(), int), .001,
+                           p, target_covariates, return_predictions=True)[3]
+    np.testing.assert_array_equal(matched_global_predictions(target_counts, target_times, p), original)
+
+
 @pytest.mark.parametrize("field", ["counts", "time_s", "speed_cm_s", "theta_phase_rad"])
 def test_changed_target_identity_is_rejected(field):
     bank, p, *_ = data()
@@ -96,7 +105,7 @@ def test_protocol_preserves_existing_model_and_measurement_settings():
     old = json.loads((root / "run_pair_coordination_endpoint_v4_group_precision_protocol.json").read_text())
     new = json.loads((root / "run_pair_coordination_endpoint_v5_support_protocol.json").read_text())
     text = {"protocol_id", "frozen_before", "scope", "rate_model", "source_and_support", "claim_boundary"}
-    assert set(new) - set(old) == {"rate_training_support"}
+    assert set(new) - set(old) == {"rate_training_support", "rate_score_comparator"}
     assert all(new[k] == old[k] for k in set(old) - text)
     old = json.loads((root / "tanni_replay_run_measurement_v2_protocol.json").read_text())
     new = json.loads((root / "tanni_replay_run_rate_support_protocol.json").read_text())

@@ -150,14 +150,16 @@ def period_endpoint(bank, period, p):
         except ModuleNotFoundError:
             from _run_pair_rate_glm import crossfit
         pool_labels = strata(pool_covariates["position"], pool_covariates["direction"], pool_covariates["speed"], pool_covariates["theta"], p)
-        fitted, diagnostics, means, baseline = crossfit(pool_counts, pool_times, pool_labels, p["run_bin_s"],
+        fitted, diagnostics, means, pool_baseline = crossfit(pool_counts, pool_times, pool_labels, p["run_bin_s"],
             p, pool_covariates, return_predictions=True)
         residual = fitted[target]
+        baseline = matched_global_predictions(counts[valid], times[valid], p)
         diagnostics["training_pool_unseen_stratum_fraction"] = diagnostics.pop("unseen_stratum_fraction")
         diagnostics.update(rate_training_support="same_period_full_run", training_pool_bins=len(pool_times),
             predicted_bins=int(np.isfinite(residual).all(axis=1).sum()), total_bins=len(target),
             predicted_mean_count_min=float(means[target].min()), predicted_mean_count_max=float(means[target].max()),
-            heldout_poisson_improvement_over_global=float(np.sum(xlogy(counts[valid], means[target] / baseline[target]) - means[target] + baseline[target])))
+            heldout_poisson_improvement_over_global=float(np.sum(xlogy(counts[valid], means[target] / baseline) - means[target] + baseline)),
+            heldout_poisson_improvement_over_pool_global=float(np.sum(xlogy(counts[valid], means[target] / pool_baseline[target]) - means[target] + pool_baseline[target])))
     else:
         residual, diagnostics = crossfit_rates(counts[valid], times[valid], labels, p["run_bin_s"], p, covariates=covariates)
     predicted = np.isfinite(residual).all(axis=1)
@@ -172,9 +174,28 @@ def period_endpoint(bank, period, p):
                     "usable_bins": int(predicted.sum()), "physical_lag_opportunities": opportunities, **diagnostics}
 
 
+def matched_global_predictions(counts, times, p):
+    """Keep the original matched-target comparator fixed during support sensitivity."""
+    blocks = np.floor(times / p["crossfit_time_block_s"]).astype(np.int64)
+    answer = np.full(counts.shape, np.nan)
+    for fold in range(p["crossfit_folds"]):
+        target = blocks % p["crossfit_folds"] == fold
+        if not target.any():
+            continue
+        training = ~target
+        for block in np.unique(blocks[target]):
+            training &= (times < block * p["crossfit_time_block_s"] - p["crossfit_guard_s"]) | (times >= (block + 1) * p["crossfit_time_block_s"] + p["crossfit_guard_s"])
+        require(training.any(), "Missing guarded matched-comparator training")
+        answer[target] = np.maximum((counts[training].sum(axis=0) + p["global_rate_prior_spikes"]) /
+            (training.sum() + p["global_rate_prior_exposure_s"] / p["run_bin_s"]), p["mean_count_floor"])
+    require(np.isfinite(answer).all(), "Incomplete matched global comparator")
+    return answer
+
+
 def support_pool(bank, period, p, counts, times, covariates):
     prefix = f"{period}_rate_support"
     require(p.get("rate_model_family") == "smooth_poisson_glm", "Support expansion requires the frozen smooth GLM")
+    require(p.get("rate_score_comparator") == "matched_target_training_global", "Support sensitivity requires the fixed matched comparator")
     phase = bank[f"{prefix}_theta_phase_rad"]
     require(phase.ndim == 2 and phase.shape[1] > 0, "Native support theta required")
     require(np.allclose(bank[f"{prefix}_bin_duration_s"], p["run_bin_s"], rtol=0, atol=1e-12), "Support bin width changed")

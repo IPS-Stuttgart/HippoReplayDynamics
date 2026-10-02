@@ -56,6 +56,7 @@ def independently_measure_period(bank, period, p):
     check(np.all(covariates["speed"] > p["speed_edges_cm_s"][0]) and
           np.all(covariates["speed"] <= p["speed_edges_cm_s"][-1]), "RUN speed outside frozen bounds")
     if p.get("rate_training_support") == "same_period_full_run":
+        check(p.get("rate_score_comparator") == "matched_target_training_global", "Fixed matched comparator required")
         prefix = f"{period}_rate_support"
         finite = np.isfinite(bank[f"{prefix}_theta_phase_rad"]).all(axis=1)
         pool_times, pool_counts = bank[f"{prefix}_time_s"][finite], bank[f"{prefix}_counts"][finite]
@@ -68,7 +69,7 @@ def independently_measure_period(bank, period, p):
         for key in covariates:
             check(np.array_equal(pool_covariates[key][target], covariates[key]), "Endpoint covariates changed")
         residual, mean = independent_residuals(pool_counts, pool_times, pool_covariates, p, return_prediction=True)
-        baseline = global_predictions(pool_counts, pool_times, p)[target]
+        baseline = global_predictions(counts, times, p)
         residual, mean = residual[target], mean[target]
     else:
         residual, mean = independent_residuals(counts, times, covariates, p, return_prediction=True)

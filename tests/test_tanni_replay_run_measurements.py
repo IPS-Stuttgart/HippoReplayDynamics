@@ -56,6 +56,50 @@ def test_filtered_noise_is_not_automatically_valid_theta():
     assert support.sum() == valid.sum()
 
 
+def test_native_lfp_windows_do_not_require_long_movement_bouts():
+    p, _ = protocols()
+    fs = 200.0
+    clock = np.arange(12 * int(fs)) / fs
+    raw = np.cos(2 * np.pi * 8 * clock)
+    _, valid = measure.source_phase(raw, fs, p)
+    movement = (clock % .8) < .3
+    old, _ = measure.theta_bouts(raw, clock, fs, movement, valid, p)
+    new, windows = measure.theta_windows(raw, clock, fs, valid, p)
+    assert not old.any()
+    assert new[movement & (clock > 2) & (clock < 10)].all()
+    assert windows and all(row["start_s"] % 2 == 0 for row in windows)
+    assert all(row["theta_spectral_supported"] for row in windows)
+    raw = np.cos(2 * np.pi * 13 * clock)
+    _, valid = measure.source_phase(raw, fs, p)
+    supported, windows = measure.theta_windows(raw, clock, fs, valid, p)
+    assert not supported.any() and not any(row["theta_spectral_supported"] for row in windows)
+
+
+def test_native_lfp_windows_never_bridge_unusable_phase():
+    p, _ = protocols()
+    fs = 200.0
+    clock = np.arange(10 * int(fs)) / fs
+    raw = np.cos(2 * np.pi * 8 * clock)
+    _, valid = measure.source_phase(raw, fs, p)
+    valid[int(5 * fs)] = False
+    supported, windows = measure.theta_windows(raw, clock, fs, valid, p)
+    assert not supported[int(4 * fs):int(6 * fs)].any()
+    assert all(row["native_window_index"] != 2 for row in windows)
+
+
+def test_theta_amendment_preserves_all_screening_thresholds():
+    old, _ = protocols()
+    path = Path(__file__).parents[1] / "docs/tanni_replay_run_measurement_v2_protocol.json"
+    new = json.loads(path.read_text())
+    for key in ("seed", "theta_band_hz", "theta_filter_order", "lfp_edge_guard_s",
+                "theta_spectral_window_s", "theta_spectral_comparison_bands_hz",
+                "theta_spectral_min_power_density_ratio", "theta_spectral_peak_search_hz",
+                "minimum_theta_supported_run_fraction", "run_count_bin_s", "mua_peak_z",
+                "mua_active_fraction", "mua_detector_min_duration_s", "mua_detector_max_duration_s"):
+        assert new[key] == old[key]
+    assert not new["association_fit_enabled"] and not new["replay_sequence_validated"]
+
+
 def test_nonfinite_lfp_and_integer_clipping_break_filter_segments():
     p, _ = protocols()
     fs = 200.0

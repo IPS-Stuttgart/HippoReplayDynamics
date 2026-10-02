@@ -1,6 +1,6 @@
 """Reconstruct saved RUN/event counts and LFP phases directly from native data.
 
-Spectral checks cover the exported bouts, not an independent bout-detector census.
+Spectral checks cover exported intervals, not an independent detector census.
 No replay sequence or biological association is validated by this verifier.
 """
 from __future__ import annotations
@@ -138,6 +138,10 @@ def verify(root):
                 for row in bouts[bouts.session.eq(identity) & bouts.area.eq(reference["area"])].itertuples(index=False):
                     start = int(np.searchsorted(clock, row.start_s - 1e-9))
                     end = int(np.searchsorted(clock, row.end_s - 1e-9, side="right"))
+                    if p.get("theta_spectral_scope") == "native_grid_lfp_windows":
+                        width = int(round(fs * p["theta_spectral_window_s"]))
+                        require(start == int(row.native_window_index) * width
+                                and end == min(start + width, len(clock)), "Spectral window not on frozen native grid")
                     require(np.isfinite(phase[start:end]).all(), "Spectral bout crosses unusable LFP phase")
                     frequency, density = welch(np.asarray(raw[start:end], float), fs=fs,
                                                nperseg=min(end - start, int(round(fs * p["theta_spectral_window_s"]))),
@@ -223,7 +227,7 @@ def verify(root):
     return {"verified": True, "native_arrays_verified": checked_arrays, "run_bins_reconstructed": count_bins,
             "candidate_events_reconstructed": event_count, "dependent_pair_orders_reconstructed": pair_count,
             "frozen_pause_banks_verified": len(bank_rows), "association_tested": False, "replay_validated": False,
-            "verification_scope": "Raw-array hashes, all saved RUN/event counts, source-compatible LFP phase, exported-bout spectra, whole-bin order and summaries; not a detector census, sequence calibration or RUN-change association"}
+            "verification_scope": "Raw-array hashes, all saved RUN/event counts, source-compatible LFP phase, exported-interval spectra, whole-bin order and summaries; not a detector census, sequence calibration or RUN-change association"}
 
 
 def main(argv=None):

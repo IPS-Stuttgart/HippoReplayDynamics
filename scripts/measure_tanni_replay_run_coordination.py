@@ -105,6 +105,39 @@ def theta_bouts(raw, clock, fs, run_mask, phase_valid, p):
     return support, rows
 
 
+def theta_windows(raw, clock, fs, phase_valid, p):
+    """Assess continuous native LFP, without treating short movement as missing LFP."""
+    support = np.zeros(len(clock), bool)
+    rows = []
+    width = int(round(fs * p["theta_spectral_window_s"]))
+    minimum = int(np.ceil(fs * p["theta_spectral_min_run_bout_s"]))
+    if width < minimum or width <= 0:
+        raise ValueError("Spectral windows must accommodate the frozen minimum duration")
+    for start in range(0, len(clock), width):
+        end = min(start + width, len(clock))
+        if end - start < minimum or not phase_valid[start:end].all():
+            continue
+        f, density = welch(np.asarray(raw[start:end], float), fs=fs,
+                           nperseg=end - start, detrend="constant")
+        lo, hi = p["theta_band_hz"]
+        theta = (f >= lo) & (f <= hi)
+        adjacent = np.zeros(len(f), bool)
+        for a, b in p["theta_spectral_comparison_bands_hz"]:
+            adjacent |= (f >= a) & (f <= b)
+        search = (f >= p["theta_spectral_peak_search_hz"][0]) & (f <= p["theta_spectral_peak_search_hz"][1])
+        denominator = density[adjacent].mean() if adjacent.any() else np.nan
+        ratio = float(density[theta].mean() / denominator) if theta.any() and denominator > 0 else np.nan
+        peak = float(f[search][np.argmax(density[search])]) if search.any() else np.nan
+        ok = bool(np.isfinite(ratio) and ratio >= p["theta_spectral_min_power_density_ratio"]
+                  and lo <= peak <= hi)
+        support[start:end] = ok
+        rows.append({"start_s": float(clock[start]), "end_s": float(clock[end - 1] + 1 / fs),
+                     "duration_s": (end - start) / fs, "theta_adjacent_density_ratio": ratio,
+                     "raw_spectral_peak_hz": peak, "theta_spectral_supported": ok,
+                     "spectral_scope": "native_grid_lfp_windows", "native_window_index": start // width})
+    return support, rows
+
+
 def sample_phase(clock, phase, valid, times):
     right = np.searchsorted(clock, times, side="left")
     inside = (right > 0) & (right < len(clock))
@@ -267,7 +300,10 @@ def main(argv=None):
                                  "column": ref["lfp_column"], "shape": list(raw.shape), "dtype": raw.dtype.str,
                                  "array_sha256": array_digest(raw)})
                 phase, phase_valid = source_phase(raw, fs, p)
-                support, spectral = theta_bouts(raw, clock, fs, raw_run, phase_valid, p)
+                if p.get("theta_spectral_scope") == "native_grid_lfp_windows":
+                    support, spectral = theta_windows(raw, clock, fs, phase_valid, p)
+                else:
+                    support, spectral = theta_bouts(raw, clock, fs, raw_run, phase_valid, p)
                 phases.append(phase)
                 supports.append(support)
                 theta_rows.extend([{**identity, **ref, **x} for x in spectral])
@@ -367,6 +403,7 @@ def main(argv=None):
                 "environment_versions": {k: version(k) for k in ("numpy", "scipy", "h5py", "pandas")},
                 "outputs_sha256": {name: file_sha256(args.output_dir / name) for name in outputs},
                 "association_fit": False, "validated_replay": False, "pf_theta_blocker_unchanged": True,
+                "theta_qc_scope": p.get("theta_spectral_scope", "contiguous_run_bouts"),
                 "raw_data_in_compact_archive": False, "banks": bank_rows}
     (args.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(f"COMPLETE pauses={len(pause_rows)} events={len(event_rows)} pairs={len(pair_rows)} association_fit=False", flush=True)

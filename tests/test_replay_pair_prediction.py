@@ -264,3 +264,23 @@ def test_zero_order_animals_remain_observations_but_not_informative_subjects():
     assert result["summary"]["animals_with_nonzero_original_order"] == 2
     assert not result["summary"]["minimum_informative_animal_coverage_met"]
     assert result["summary"]["pair_rows"] == len(data.pre)
+
+
+def test_unsupported_zero_event_controls_are_flagged_without_dropping_animal():
+    data = fixture(effect=1)
+    participation = np.ones(len(data.pre))
+    participation[(data.animal == "rat0") & (data.pause == "pause0")] = 0
+    baseline = np.column_stack((data.pre, data.pre * participation))
+    result = prediction_check(replace(data, baseline=baseline))
+    assert not result["summary"]["baseline_prediction_support_complete"]
+    assert result["summary"]["animals"] == 4 and result["summary"]["pair_rows"] == len(data.pre)
+    folds = [r for r in result["folds"] if r["condition"] == 0]
+    assert folds[0]["baseline_unsupported_heldout_rows"] == 30
+    assert all(r["baseline_prediction_support_complete"] for r in folds[1:])
+
+
+def test_redundant_controls_are_supported_when_targets_share_the_row_space():
+    data = fixture(effect=1)
+    result = prediction_check(replace(data, baseline=np.column_stack((data.pre, data.pre))))
+    assert result["summary"]["baseline_prediction_support_complete"]
+    assert all(r["baseline_training_rank"] == 1 for r in result["folds"])

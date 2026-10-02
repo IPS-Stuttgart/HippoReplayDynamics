@@ -9,6 +9,8 @@ from scripts.develop_replay_pair_spike_calibration import (
     GENERATORS, copy_immigrants, generate_period, immigrant_means, make_event, run_covariates,
 )
 from scripts.verify_replay_pair_spike_development import reference_marginal_mean, reference_order
+from scripts.diagnose_replay_pair_spike_development import baseline_support, known_copying_feature
+from scripts.verify_replay_pair_spike_diagnostic import reference_architecture, reference_support
 
 ROOT = Path(__file__).resolve().parents[1]
 P = json.loads((ROOT / "docs/replay_pair_spike_development_protocol.json").read_text())
@@ -115,6 +117,36 @@ def test_independent_event_order_reconstruction():
     event, counts = make_event(np.arange(10), P, "fixed", np.random.default_rng(4), PARENT)
     expected = reference_order(counts, P["event_bin_s"], PARENT)
     np.testing.assert_allclose(expected, event["order"], rtol=0, atol=1e-14)
+
+
+def test_supplied_architecture_is_not_claimed_to_be_measured_replay_order():
+    bank = {"unit_ids": np.arange(3), "generating_event_order": np.array([2, 0, 1])}
+    a, b = np.triu_indices(3, 1)
+    feature = known_copying_feature(bank, a, b, "order_specific_update")
+    np.testing.assert_array_equal(feature, [1, -1, 0])
+    np.testing.assert_array_equal(feature, reference_architecture(bank["generating_event_order"], a, b))
+    np.testing.assert_array_equal(known_copying_feature(bank, a, b, "no_update"), 0)
+
+
+def test_zero_event_target_can_leave_training_baseline_row_space():
+    training = np.array([[1., 1.], [-2., -2.], [3., 3.]])
+    target = np.array([[1., 1.], [1., 0.]])
+    support = baseline_support(training, target, np.ones(3))
+    assert support["baseline_training_rank"] == 1
+    assert support["baseline_max_heldout_nullspace_loading"] > .1
+    rank, loading, unsupported = reference_support(training, target, np.ones(3))
+    assert rank == support["baseline_training_rank"]
+    assert unsupported == support["baseline_unsupported_heldout_rows"] == 1
+    np.testing.assert_allclose(loading, support["baseline_max_heldout_nullspace_loading"], atol=1e-14)
+    aligned = baseline_support(training, target[:1], np.ones(3))
+    assert aligned["baseline_max_heldout_nullspace_loading"] < 1e-14
+
+
+def test_baseline_support_is_not_based_on_test_outcomes():
+    training = np.array([[1., 0.], [0., 2.], [-1., 1.]])
+    support = baseline_support(training, np.array([[20., 4.]]), np.ones(3))
+    assert support["baseline_training_rank"] == 2
+    assert support["baseline_max_heldout_nullspace_loading"] == 0
 
 
 @pytest.mark.parametrize("probability,lag", [(-.1, 2), (1.1, 2), (.5, 0), (.5, 8)])

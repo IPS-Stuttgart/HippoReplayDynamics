@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 
 from scripts import audit_tanni_replay_run_inputs as audit
+from scripts import verify_tanni_replay_run_inputs as verifier
+from scripts.audit_replay_order_run_coordination import epoch_links, immobile_pauses, matched_run, link_spikes
 
 
 def test_curated_labels_index_retained_not_raw_spikes():
@@ -147,3 +149,25 @@ def test_zero_or_header_only_support_never_completes_goal():
         assert not gates["theta_control_implemented_and_validated"]
         assert not gates["replay_order_and_run_change_tested"]
     assert not {x["gate"]: x["passed"] for x in audit.decision_gates([])}["all_inventory_sessions_resolved"]
+
+
+def test_independent_pause_and_run_matching_with_rates_and_gaps():
+    p = json.loads((Path(__file__).parents[1] / "docs/replay_order_run_coordination_protocol.json").read_text())
+    rng = np.random.default_rng(27)
+    t = np.arange(0, 80.01, .025)
+    x = (np.mod(t, 8) < 4) * np.mod(t, 4) * 15
+    x[(t >= 30) & (t <= 31)] = 0
+    x[(t >= 40) & (t <= 41)] = np.nan
+    position = np.column_stack((t, x, np.zeros(len(t))))
+    links = epoch_links(position, np.asarray([[t[0], t[-1]]]), p)
+    actual = immobile_pauses(links, p)
+    assert verifier.reference_pauses(position, p) == [(r["tracking_start_index"], r["start_s"], r["end_s"]) for r in actual]
+    spikes = np.column_stack((np.sort(rng.uniform(0, 80, 2000)), rng.integers(1, 12, 2000)))
+    for pause in actual:
+        observed, before, _ = matched_run(links, pause, p)
+        pre = spikes[link_spikes(spikes[:, 0], links, before)]
+        _, counts = np.unique(pre[:, 1], return_counts=True)
+        observed["eligible_preceding_units"] = int(np.sum(counts >= p["minimum_preceding_run_spikes_per_unit"]))
+        independent = verifier.reference_match(position, spikes, (pause["start_s"], pause["end_s"]), p)
+        for key in observed:
+            assert observed[key] == pytest.approx(independent[key])

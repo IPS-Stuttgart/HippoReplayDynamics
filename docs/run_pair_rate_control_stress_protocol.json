@@ -1,0 +1,15 @@
+{
+  "protocol_id": "run_pair_rate_control_development_stress_v1_20261002",
+  "seed": 20261002,
+  "replicates": 200,
+  "cells_per_pause": 8,
+  "base_rate_hz": 15.0,
+  "theta_concentration": 1.25,
+  "post_even_cell_phase_shift_rad": 1.5707963267948966,
+  "pause_selection": "Earliest theta-qualified measured pause per animal, using the existing frozen cohort. Never select by coordination, replay content or stress results.",
+  "cell_selection": "First eight frozen unit IDs in each selected bank; their documented LFP reference correspondence determines the theta covariate. This deliberately bounded development stress does not represent a fully calibrated biological procedure.",
+  "generator": "Independent Poisson counts in every measured RUN bin, conditioned on the saved native LFP theta phase. Fixed evenly spaced cellular phase preferences, with a pi/2 POST preference change for even-numbered cells. Known generating intensities are retained; there are no inter-neuron interactions or replay-driven updates. PRE/POST behavior, support, clock gaps and finite-theta masks are the observed ones.",
+  "comparison": "Apply the frozen cross-fitted joint-stratum rate adjustment and compare POST-minus-PRE coordination with the oracle residual endpoint using the exact generating intensity. Both use the identical counts, physical lag support and retained windows.",
+  "summary": "For each animal and fixed neuron pair report Monte Carlo mean and standard deviation of fitted, oracle and fitted-minus-oracle endpoints. Bonferroni-correct a two-sided t interval across all animal-pair discrepancies in this fixed development family. This tests systematic nuisance bias, not biological significance or a full-procedure false-positive rate.",
+  "claim_boundary": "No replay-order association, synaptic interpretation, animal-level biological inference, validation-bank completion or goal completion. Passing this single generator cannot replace the six mandatory full-procedure calibrations; failing it requires improving nuisance adjustment before those calibrations."
+}

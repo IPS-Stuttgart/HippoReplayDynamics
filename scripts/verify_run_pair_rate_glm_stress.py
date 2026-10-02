@@ -64,7 +64,7 @@ def features(training, target, p):
     return matrices
 
 
-def independent_residuals(counts, times, covariates, p):
+def independent_residuals(counts, times, covariates, p, *, return_prediction=False):
     """Direct weighted Poisson objective; no producer rate fitting or cached design."""
     prediction = np.full(counts.shape, np.nan)
     block = np.floor(times / p["crossfit_time_block_s"]).astype(int)
@@ -105,7 +105,8 @@ def independent_residuals(counts, times, covariates, p):
             prediction[target] = np.column_stack(list(pool.map(fit_cell, range(counts.shape[1]))))
     check(np.isfinite(prediction).all(), "Incomplete independently fitted predictions")
     prediction = np.maximum(prediction, p["mean_count_floor"])
-    return (counts - prediction) / np.sqrt(prediction)
+    residual = (counts - prediction) / np.sqrt(prediction)
+    return (residual, prediction) if return_prediction else residual
 
 
 def main(argv=None):

@@ -17,6 +17,7 @@
   "n_shuffles": 20,
   "shuffle_pipeline": "every shuffled event preserves the complete population-bin vectors, cell totals, participation and duration; independently regenerate features and refit baseline and augmented models for every control; do not reverse fitted feature signs",
   "minimum_animals_for_statistical_core_check": 3,
+  "informative_animal_accounting": "Retain zero-event/zero-order animals and every frozen pause in prediction and denominator tables. Report animals with nonzero original order separately; fewer than three informative animals cannot satisfy the development coverage check even when the total cohort is larger. This is not a power certificate or biological gate pass.",
   "development_readouts": ["held-out weighted MSE improvement by animal and control", "original gain minus each animal's median shuffled gain", "training-fold order coefficient", "train-only feature scales and ranks"],
   "development_fixture_design": "Four artificial animals, two artificial recordings per animal, two pauses per recording, eight units. Keep the first pause per animal as a zero-event observation. Other pauses contain two synthetic 24-bin population bursts of width 5 ms. The same count-preserving order features are reused across four planted-response algebra checks, not interpreted as neural generators.",
   "development_fixture_cases": ["existing_coordination_algebra", "nuisance_only_algebra", "planted_positive_order_algebra", "planted_negative_order_algebra"],

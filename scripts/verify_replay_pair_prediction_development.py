@@ -97,6 +97,11 @@ def main(argv=None):
                                  np.log1p(bank["event_spikes_a"]) - np.log1p(bank["event_spikes_b"]),
                                  pre * bank["participation"]], axis=1)
             close(features, bank["baseline"], f"{name}/PRE baseline controls")
+            informative = sum(bool(np.any(bank["order"][bank["animal"] == animal, 0] != 0))
+                              for animal in set(bank["animal"]))
+            if int(row["animals_with_nonzero_original_order"]) != informative or (
+                    row["minimum_informative_animal_coverage_met"] != str(informative >= 3)):
+                raise ValueError("Informative-animal denominator differs")
             prediction, baseline = reference_predictions(bank)
             close(prediction, bank["predictions"], f"{name}/all held-out predictions")
             close(baseline, bank["baseline_predictions"], f"{name}/all held-out baseline predictions")

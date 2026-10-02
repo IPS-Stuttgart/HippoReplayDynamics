@@ -253,3 +253,14 @@ def test_negative_order_effect_is_not_mislabeled_as_positive_update():
     result = prediction_check(fixture(effect=-2))
     assert result["summary"]["original_mean_animal_gain"] > 1
     assert all(x["order_coefficient_original_units"] < 0 for x in result["folds"] if x["condition"] == 0)
+
+
+def test_zero_order_animals_remain_observations_but_not_informative_subjects():
+    data = fixture(effect=1)
+    order = data.order.copy()
+    order[np.isin(data.animal, ["rat2", "rat3"])] = 0
+    result = prediction_check(replace(data, order=order))
+    assert result["summary"]["animals"] == 4
+    assert result["summary"]["animals_with_nonzero_original_order"] == 2
+    assert not result["summary"]["minimum_informative_animal_coverage_met"]
+    assert result["summary"]["pair_rows"] == len(data.pre)

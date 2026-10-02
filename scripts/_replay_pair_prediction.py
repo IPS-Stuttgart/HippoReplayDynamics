@@ -167,7 +167,10 @@ def prediction_check(data, *, order_penalty=1.0):
     animal_gain = np.array([[r["heldout_mse_improvement"] for r in rows if r["animal"] == str(a)]
                            for a in animals])
     require(animal_gain.shape == (len(animals), data.order.shape[1]), "Animal denominator changed")
+    informative_animals = sum(bool(np.any(data.order[data.animal == a, 0] != 0)) for a in animals)
     summary = {"animals": len(animals), "pair_rows": len(data.pre),
+               "animals_with_nonzero_original_order": informative_animals,
+               "minimum_informative_animal_coverage_met": informative_animals >= 3,
                "n_shuffles": data.order.shape[1] - 1,
                "original_mean_animal_gain": float(animal_gain[:, 0].mean()),
                "shuffle_mean_animal_gains": animal_gain[:, 1:].mean(axis=0).tolist(),

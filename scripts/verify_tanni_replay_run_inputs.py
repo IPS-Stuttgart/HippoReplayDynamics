@@ -180,8 +180,8 @@ def verify(root: Path) -> dict:
                 chosen = good and start - p["run_search_window_s"] >= last_end
                 require(bool(row.run_supported) == bool(good) and bool(row.earliest_nonoverlap_supported) == bool(chosen),
                         "Support/nonoverlap flag disagreement")
-                supported += good
-                selected += chosen
+                supported += int(good)
+                selected += int(chosen)
                 if chosen:
                     last_end = end + p["run_search_window_s"]
                 checked_pauses += 1

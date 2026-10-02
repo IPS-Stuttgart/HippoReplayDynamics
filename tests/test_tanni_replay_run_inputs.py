@@ -113,6 +113,13 @@ def test_array_digest_contains_dtype_and_shape():
         audit.array_digest(np.asarray([{}], dtype=object))
 
 
+def test_native_json_accounting_for_numpy_threshold_flags():
+    total = 0
+    for flag in [np.bool_(True), np.bool_(False), np.bool_(True)]:
+        total += int(flag)
+    assert json.dumps({"verified_supported_nonoverlap_pauses": total}) == '{"verified_supported_nonoverlap_pauses": 2}'
+
+
 def test_future_spikes_cannot_qualify_preceding_unit_support():
     matching = json.loads((Path(__file__).parents[1] / "docs/replay_order_run_coordination_protocol.json").read_text())
     times = np.arange(0, 41.001, .025)

@@ -344,9 +344,9 @@ def opportunity(a, b, states, left_spikes, right_spikes, params, cutoff_s):
         row['reason'] = 'compound_or_artifact'
         return row
     edges = start + np.arange(11) * 0.02
-    l, r = count_bins(left_spikes, edges), count_bins(right_spikes, edges)
-    both = ((l.sum(axis=1) >= params['min_spikes_per_bin']) & ((l > 0).sum(axis=1) >= params['min_active_cells_per_bin']) &
-            (r.sum(axis=1) >= params['min_spikes_per_bin']) & ((r > 0).sum(axis=1) >= params['min_active_cells_per_bin']))
+    left_counts, right_counts = count_bins(left_spikes, edges), count_bins(right_spikes, edges)
+    both = ((left_counts.sum(axis=1) >= params['min_spikes_per_bin']) & ((left_counts > 0).sum(axis=1) >= params['min_active_cells_per_bin']) &
+            (right_counts.sum(axis=1) >= params['min_spikes_per_bin']) & ((right_counts > 0).sum(axis=1) >= params['min_active_cells_per_bin']))
     row['supported_bins_both'] = int(both.sum())
     row['supported'] = int(both.sum()) >= params['min_supported_bins']
     row['reason'] = 'sequence_testing_opportunity_not_validated_replay' if row['supported'] else 'insufficient_bilateral_bin_support'

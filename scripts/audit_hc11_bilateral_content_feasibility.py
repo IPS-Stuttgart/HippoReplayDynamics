@@ -310,11 +310,13 @@ def opportunities(args, protocol):
                         part = core.envelope_events(envelope, fs, start, mean, sd, f'{side}:{shank}:{state}:{segment}', protocol['ripple'])
                         # Clip/saturation is retained as an exclusion, not a clean candidate.
                         for r in part:
+                            r['channel_id'] = channel_id
                             lo, hi = int((r['start_s'] - start) * fs), int((r['end_s'] - start) * fs)
                             r['artifact'] = bool(np.any(np.abs(lfp[lo:hi]) >= 32767))
                         rows.extend(part)
             detected[side] = core.merge_channels(rows)
-            candidates.extend({'session': session, 'hemisphere': side, **r, 'parents': json.dumps(r['parents'])} for r in detected[side])
+            candidates.extend({'session': session, 'hemisphere': side, **r, 'parents': json.dumps(r['parents']),
+                               'parent_channels': json.dumps(r['parent_channels'])} for r in detected[side])
         matched = core.match_ripples(detected['left'], detected['right'], protocol['ripple']['peak_separation_s'], protocol['ripple']['min_overlap_s'])
         session_windows = [core.opportunity(a, b, states, population['left'], population['right'], protocol['ripple'], max(cutoffs)) for a, b in matched]
         windows.extend({'session': session, 'animal': review['animal'], **r} for r in session_windows)
@@ -328,7 +330,7 @@ def opportunities(args, protocol):
                            'supported_windows': sum(r['supported'] for r in state_windows), 'coincident_windows': len(state_windows), 'reason': ''})
     table(args.output_dir, 'opportunity_counts', counts)
     table(args.output_dir, 'opportunity_inventory', windows, columns=['session', 'animal', 'left_id', 'right_id', 'start_s', 'end_s', 'state', 'supported', 'reason', 'supported_bins_both'])
-    table(args.output_dir, 'ripple_inventory', candidates, columns=['session', 'hemisphere', 'id', 'start_s', 'end_s', 'peak_s', 'peak_z', 'artifact', 'parents', 'compound', 'matched'])
+    table(args.output_dir, 'ripple_inventory', candidates, columns=['session', 'hemisphere', 'id', 'start_s', 'end_s', 'peak_s', 'peak_z', 'artifact', 'parents', 'parent_channels', 'compound', 'matched'])
     table(args.output_dir, 'channel_selection', channel_selection, columns=['session', 'hemisphere', 'shank', 'channel_id', 'row_index', 'baseline_mean', 'baseline_sd', 'selection_epoch'])
 
 

@@ -284,12 +284,20 @@ def merge_channels(events):
     rows = []
     for event in sorted(events, key=lambda v: (v['start_s'], v['id'])):
         if not rows or event['start_s'] >= rows[-1]['end_s']:
-            rows.append({**event, 'parents': [event['id']], 'compound': False})
+            rows.append({**event, 'parents': [event['id']], 'parent_channels': [event.get('channel_id')],
+                         'parent_peak_min_s': event['peak_s'], 'parent_peak_max_s': event['peak_s'], 'compound': False})
         else:
             last = rows[-1]
             last['end_s'] = max(last['end_s'], event['end_s'])
             last['parents'].append(event['id'])
-            last['compound'] = True
+            last['parent_channels'].append(event.get('channel_id'))
+            last['parent_peak_min_s'] = min(last['parent_peak_min_s'], event['peak_s'])
+            last['parent_peak_max_s'] = max(last['parent_peak_max_s'], event['peak_s'])
+            # Co-detection on distinct shanks is not automatically a compound ripple.
+            last['compound'] = (len(set(last['parent_channels'])) != len(last['parent_channels']) or
+                                None in last['parent_channels'] or
+                                last['parent_peak_max_s'] - last['parent_peak_min_s'] > 0.05 + 1e-12 or
+                                last['end_s'] - last['start_s'] > 0.2 + 1e-12)
             last['artifact'] |= event.get('artifact', False)
             if (event['peak_z'], event['id']) > (last['peak_z'], last['id']):
                 last['peak_z'], last['peak_s'] = event['peak_z'], event['peak_s']

@@ -47,6 +47,7 @@
     "min_spikes_per_bin": 3,
     "min_active_cells_per_bin": 2,
     "support_rule": "same_five_bins_supported_in_both_hemispheres",
+    "compound_rule": "repeat_channel_parent_or_parent_peak_span_over_50ms_or_merged_duration_over_200ms",
     "recipe_status": "frozen_operational_feasibility_not_exact_published_replication"
   },
   "states": ["awake_rest", "POST_NREM"],

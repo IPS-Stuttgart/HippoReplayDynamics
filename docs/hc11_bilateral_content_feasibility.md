@@ -68,7 +68,10 @@ PRE-NREM alone determines baseline normalization and one eligible channel per
 verified shank, ranked by mean detected peak z score with channel-identity ties.
 Detection never filters across disjoint state segments. The operational detector
 is not advertised as an exact reproduction of the 2025 implementation.
-Overlapping channel detections retain parent IDs and compound flags. Compound
+Overlapping channel detections retain parent IDs and compound flags. Distinct
+channels co-detecting the same ripple are not automatically compound. The frozen
+compound rule is a repeated-channel parent, parent-peak span above 50 ms, or
+merged duration above 200 ms. Missing channel identity is unresolved. Compound
 events are inventoried but do not qualify as clean opportunities.
 
 Ripple matching maximizes cardinality before minimizing total peak separation.

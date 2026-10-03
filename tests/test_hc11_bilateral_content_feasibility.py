@@ -132,6 +132,12 @@ def test_overlap_merge_keeps_parent_identity_and_compound_flag():
     assert len(merged) == 2 and merged[0]['parents'] == ['a', 'b'] and merged[0]['compound']
 
 
+def test_distinct_channels_co_detecting_same_ripple_not_compound():
+    merged = c.merge_channels([{**event('a', 1), 'channel_id': 2}, {**event('b', 1.01), 'channel_id': 42}])
+    assert len(merged) == 1 and not merged[0]['compound']
+    assert merged[0]['parent_channels'] == [2, 42]
+
+
 def test_maximum_cardinality_before_nearest_peak_greedy():
     # l2 only reaches r1; greedy l1->r1 would leave just one pair.
     left = [event('l1', 1), event('l2', 0.965)]

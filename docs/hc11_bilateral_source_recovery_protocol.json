@@ -1,0 +1,22 @@
+{
+  "protocol_id": "hc11_bilateral_bounded_source_recovery_20261003_v1",
+  "scope": "one_source_recovery_attempt_not_neural_or_biological_analysis",
+  "authorization": "User requested one bounded source-recovery after resuming this study",
+  "unchanged_feasibility_protocol_sha256": "451802224813947b338e95df78c1aad2f31a7e64b9e0c7d9761baf0d1a426ed0",
+  "dataset": "hc-11",
+  "crcns_base_url": "https://download.crcns.org/hc-11/",
+  "allowed_files": [
+    "data/NoveltySessInfoMatFiles.tar.gz",
+    "docs/Channel_Orderings.pdf",
+    "docs/Sessions_Recordings_Summary.pdf",
+    "docs/crcns_hc-11_data_description.pdf"
+  ],
+  "network_budget_bytes": 536870912,
+  "unpacked_budget_bytes": 1073741824,
+  "reserve_bytes": 32212254720,
+  "socket_timeout_s": 30,
+  "wall_time_limit_s": 1800,
+  "sessions": ["Achilles_10252013", "Achilles_11012013", "Buddy_06272013", "Cicero_09012014", "Cicero_09102014", "Cicero_09172014", "Gatsby_08022013", "Gatsby_08282013"],
+  "state_rule": "Keep original Wake, Drowsy, NREM, Intermediate and REM separate. Wake alone is not a quiet-rest label; low movement alone is not wakefulness. Inspect source-Wake intersected with valid immobile MAZE tracking only as an availability diagnostic, not as qualified replay windows.",
+  "prohibitions": ["EEG_acquisition", "waveform_acquisition", "author_requests", "source_clock_repair", "hemisphere_from_converted_UID", "Drowsy_as_awake", "threshold_changes", "biological_comparison", "novelty_presumed", "manuscript_claim_changes"]
+}

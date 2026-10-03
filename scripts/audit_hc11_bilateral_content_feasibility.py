@@ -69,8 +69,8 @@ def checkpoint(args, stage, key, inputs):
 
 
 def save_checkpoint(args, stage, key, inputs, before):
-    outputs = {p.name: file_sha256(p) for p in args.output_dir.iterdir()
-               if p.is_file() and p.name not in before and not p.name.endswith('_checkpoint.json')}
+    outputs = {str(p.relative_to(args.output_dir)): file_sha256(p) for p in args.output_dir.rglob('*')
+               if p.is_file() and str(p.relative_to(args.output_dir)) not in before and not p.name.endswith('_checkpoint.json')}
     write_json(args.output_dir / f'{stage}_checkpoint.json', {'identity': key, 'inputs': inputs, 'outputs': outputs,
                'completed_at_utc': datetime.now(UTC).isoformat()})
 
@@ -173,7 +173,8 @@ def inventory(args, protocol):
         print(json.dumps({'stage': 'inventory', **row}), flush=True)
     table(args.output_dir, 'source_inventory', files)
     table(args.output_dir, 'recording_inventory', recordings)
-    table(args.output_dir, 'unit_crosswalk', units)
+    table(args.output_dir, 'unit_crosswalk', units, columns=['session', 'unit_id', 'original_cluster_id', 'spike_group',
+          'cluster_within_group', 'shank', 'hemisphere', 'ca1_pyramidal', 'timing_verified', 'mapping_verified', 'reason'])
     table(args.output_dir, 'channel_crosswalk', channels, columns=['session', 'spike_group', 'channel_id', 'shank', 'hemisphere', 'xml_n_channels', 'session_info_n_channels', 'lfp_sampling_rate', 'spike_sampling_rate', 'mapping_verified', 'reason'])
     table(args.output_dir, 'state_inventory', states, columns=['session', 'source', 'label', 'intervals', 'duration_s', 'awake_rest_verified', 'reason'])
     return review_paths
@@ -475,6 +476,19 @@ def main():
             if file_sha256(r.path) != r.sha256:
                 raise ValueError(f'input changed since inventory: {r.path}')
         inputs['source_inventory'] = file_sha256(inventory_path)
+        for stage in ('inventory', 'run-qc', 'opportunities', 'verify'):
+            if stage == args.stage:
+                break
+            dependency = args.output_dir / f'{stage}_checkpoint.json'
+            if not dependency.exists():
+                raise ValueError(f'missing prerequisite stage: {stage}')
+            inputs[f'{stage}_checkpoint'] = file_sha256(dependency)
+            upstream = json.loads(dependency.read_text())
+            if upstream['identity'] != key:
+                raise ValueError('upstream checkpoint code/protocol identity mismatch')
+            for name, digest in upstream['outputs'].items():
+                if file_sha256(args.output_dir / name) != digest:
+                    raise ValueError(f'upstream checkpoint output changed: {name}')
     existing = checkpoint(args, args.stage, key, inputs)
     if existing:
         if args.stage == 'inventory':
@@ -484,7 +498,7 @@ def main():
                     raise ValueError('source changed since inventory checkpoint')
         print(json.dumps({'stage': args.stage, 'status': 'hash_verified_already_complete'}), flush=True)
         return
-    before = {p.name for p in args.output_dir.iterdir()}
+    before = {str(p.relative_to(args.output_dir)) for p in args.output_dir.rglob('*') if p.is_file()}
     if args.stage == 'inventory':
         inventory(args, protocol)
     elif args.stage == 'run-qc':

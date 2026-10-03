@@ -254,3 +254,21 @@ def test_all_stages_source_limited_report_without_zero_observations(tmp_path):
     gates = pd.read_csv(out / 'hc11_bilateral_gate_summary.csv').set_index('gate')
     assert gates.loc['overall', 'status'] == 'inconclusive_feasibility'
     assert (out / 'hc11_bilateral_source_availability.png').exists()
+
+
+def test_invalid_native_state_does_not_hide_independent_unit_crosswalk(tmp_path):
+    data, out = tmp_path / 'data', tmp_path / 'output'
+    data.mkdir(); out.mkdir()
+    session = PROTOCOL['sessions'][0]
+    epochs = {label: np.array([0, 1]) for label in ('PREEpoch', 'MazeEpoch', 'POSTEpoch', 'Wake', 'Drowsy', 'NREM', 'Intermediate', 'REM')}
+    epochs['Intermediate'] = np.array([0, 0])
+    src = {'Spikes': {'SpikeTimes': [0.2, 0.4], 'SpikeIDs': [1602, 1602], 'PyrIDs': [1602]}, 'Epochs': epochs}
+    savemat(data / (session + '_sessInfo.mat'), {'sessInfo': src})
+    savemat(data / (session + '.spikes.cellinfo.mat'), {'spikes': {'UID': 1, 'times': [0.2, 0.4]}})
+    audit.inventory(argparse.Namespace(dataset_root=data, output_dir=out), PROTOCOL)
+    cross = pd.read_csv(out / 'hc11_bilateral_unit_crosswalk.csv')
+    assert cross.timing_verified.all() and cross.spike_group.iloc[0] == 16
+    state = pd.read_csv(out / 'hc11_bilateral_state_inventory.csv')
+    assert state[state.label == 'Intermediate'].duration_s.isna().all()
+    recording = pd.read_csv(out / 'hc11_bilateral_recording_inventory.csv')
+    assert not recording.source_verified.any()

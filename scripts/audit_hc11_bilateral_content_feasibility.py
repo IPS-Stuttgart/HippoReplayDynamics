@@ -122,10 +122,15 @@ def inventory(args, protocol):
             if src:
                 row['original_units'] = len(np.unique(src['Spikes']['SpikeIDs']))
                 for label in ('PREEpoch', 'MazeEpoch', 'POSTEpoch', 'Wake', 'Drowsy', 'NREM', 'Intermediate', 'REM'):
-                    domain = core.intervals(src['Epochs'][label])
-                    states.append({'session': session, 'source': '_sessInfo.mat', 'label': label, 'intervals': len(domain),
-                                   'duration_s': float(np.diff(domain, axis=1).sum()), 'awake_rest_verified': False,
-                                   'reason': 'Wake denotes active waking; Drowsy includes light sleep; neither silently becomes awake rest'})
+                    try:
+                        domain = core.intervals(src['Epochs'][label])
+                        states.append({'session': session, 'source': '_sessInfo.mat', 'label': label, 'intervals': len(domain),
+                                       'duration_s': float(np.diff(domain, axis=1).sum()), 'awake_rest_verified': False,
+                                       'reason': 'Wake denotes active waking; Drowsy includes light sleep; neither silently becomes awake rest'})
+                    except ValueError as exc:
+                        reasons.append(f'invalid_original_state:{label}:{exc}')
+                        states.append({'session': session, 'source': '_sessInfo.mat', 'label': label, 'intervals': None,
+                                       'duration_s': None, 'awake_rest_verified': False, 'reason': f'invalid_original_intervals:{exc}'})
                 if converted:
                     cross = core.original_crosswalk(src['Spikes'], converted, verified.get('spike_groups') if verified else None)
                     units.extend({'session': session, **r} for r in cross)

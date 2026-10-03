@@ -1,0 +1,17 @@
+{
+  "scope": "documented_hemisphere_identity_not_full_neural_source_signoff",
+  "source": "docs/Channel_Orderings.pdf",
+  "source_sha256": "7fe4731e6785e8a4da55799cfd470ec9d0ce5f39412b4f394b3de0ee38c948fe",
+  "source_channel_numbering": "one_based; XML channel identities are zero_based",
+  "sessions": {
+    "Buddy_06272013": {"page": 1, "document_n_channels": 132, "left_ca1_groups": [1,2,3,4,5,6,7,8], "right_ca1_groups": [9,10,11,12,13,14,15,16], "red_excluded_channels_one_based": [24,27,58], "unresolved_document_channel_omissions_one_based": [114]},
+    "Gatsby_08022013": {"page": 2, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6,7,8], "right_ca1_groups": [9,10,11,12,13,14,15,16], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []},
+    "Gatsby_08282013": {"page": 3, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6,7,8], "right_ca1_groups": [9,10,11,12,13,14,15,16], "red_excluded_channels_one_based": [35,45,47], "unresolved_document_channel_omissions_one_based": []},
+    "Achilles_10252013": {"page": 4, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6], "right_ca1_groups": [8,9,10,11,12,13], "extra_groups_not_CA1_verified": [7,14], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []},
+    "Achilles_11012013": {"page": 4, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6], "right_ca1_groups": [8,9,10,11,12,13], "extra_groups_not_CA1_verified": [7,14], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []},
+    "Cicero_09012014": {"page": 5, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6], "right_ca1_groups": [8,9,10,11,12,13], "extra_groups_not_CA1_verified": [7,14], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []},
+    "Cicero_09102014": {"page": 5, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6], "right_ca1_groups": [8,9,10,11,12,13], "extra_groups_not_CA1_verified": [7,14], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []},
+    "Cicero_09172014": {"page": 5, "document_n_channels": 134, "left_ca1_groups": [1,2,3,4,5,6], "right_ca1_groups": [8,9,10,11,12,13], "extra_groups_not_CA1_verified": [7,14], "red_excluded_channels_one_based": [], "unresolved_document_channel_omissions_one_based": []}
+  },
+  "limits": ["Probe CA1 labels do not by themselves select pyramidal-layer LFP channels", "Extra groups 7 and 14 in Achilles/Cicero are not silently treated as CA1", "Buddy channel 114 omission remains unresolved", "No automatic bilateral_source_verification.json is written"]
+}

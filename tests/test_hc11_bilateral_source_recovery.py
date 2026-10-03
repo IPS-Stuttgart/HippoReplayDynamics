@@ -8,6 +8,9 @@ import pytest
 from scripts.recover_hc11_bilateral_sources import (
     download, extract_summaries, parse_checksums, parse_index, safe_relative, wake_immobility,
 )
+from scripts.report_hc11_source_recovery import (
+    animal_ceiling, ca1_identity, independent_spike_check, optional_bool, source_field_comparison,
+)
 
 
 def test_index_is_authentic_and_unambiguous():
@@ -101,3 +104,68 @@ def test_wake_availability_uses_documented_meters_and_never_repairs_clock():
     original['Position']['TimeStamps'] = [0, .1, .05]
     with pytest.raises(ValueError, match='chronology'):
         wake_immobility(original)
+
+
+def test_original_group_16_retained_extra_groups_not_assumed_CA1():
+    mapping = {'left_ca1_groups': list(range(1,9)), 'right_ca1_groups': list(range(9,17))}
+    assert ca1_identity(16,mapping) == ('right',8)
+    mapping = {'left_ca1_groups': list(range(1,7)), 'right_ca1_groups': list(range(8,14))}
+    assert ca1_identity(7,mapping) == (None,None)
+    assert ca1_identity(14,mapping) == (None,None)
+    assert ca1_identity(8,mapping) == ('right',1)
+    with pytest.raises(ValueError):
+        ca1_identity(1,{'left_ca1_groups':[1], 'right_ca1_groups':[1]})
+
+
+def test_cohort_ceiling_cannot_promote_missing_EEG_or_few_units():
+    rows = [
+        {'animal':'A', 'eeg_present':True, 'pyramidal_left_upper_bound':50, 'pyramidal_right_upper_bound':50, 'eeg_original_clock_agrees':True},
+        {'animal':'B', 'eeg_present':True, 'pyramidal_left_upper_bound':40, 'pyramidal_right_upper_bound':2, 'eeg_original_clock_agrees':True},
+        {'animal':'C', 'eeg_present':False, 'pyramidal_left_upper_bound':30, 'pyramidal_right_upper_bound':30, 'eeg_original_clock_agrees':None},
+        {'animal':'D', 'eeg_present':True, 'pyramidal_left_upper_bound':18, 'pyramidal_right_upper_bound':48, 'eeg_original_clock_agrees':False},
+        {'animal':'D', 'eeg_present':True, 'pyramidal_left_upper_bound':41, 'pyramidal_right_upper_bound':0, 'eeg_original_clock_agrees':True},
+    ]
+    assert animal_ceiling(rows,10) == ['A','D']
+    assert animal_ceiling(rows,10,require_clock=True) == ['A']
+
+
+def test_independent_spike_verification_rejects_nonfinite_and_duplicate_identities(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / 'original.mat'
+    with h5py.File(path,'w') as handle:
+        group = handle.create_group('sessInfo/Spikes')
+        group.create_dataset('SpikeTimes',data=[.1,.2,.3,.4])
+        group.create_dataset('SpikeIDs',data=[101,1602,101,1602])
+        group.create_dataset('PyrIDs',data=[101,1602])
+    converted = {'UID':[1,2], 'times':[np.array([.1,.3]),np.array([.2,.4])]}
+    audited = [{'unit_id':'1','original_cluster_id':'101'}, {'unit_id':'2','original_cluster_id':'1602'}]
+    rows,pyr = independent_spike_check(path,converted,audited)
+    assert pyr == {101,1602}
+    assert all(row['max_spike_time_difference_s'] == 0 for row in rows)
+    with pytest.raises(ValueError,match='duplicate original identity'):
+        independent_spike_check(path,converted,[audited[0],audited[0]])
+    converted['times'][1][0] = np.nan
+    with pytest.raises(ValueError,match='converted spike chronology'):
+        independent_spike_check(path,converted,audited)
+
+
+def test_numeric_comparison_does_not_turn_missing_fields_into_agreement():
+    import numpy as np
+
+    original = {'Spikes': {'times': [1., np.nan]}, 'Position': {'MazeType': 'linear'}, 'Epochs': {}}
+    previous = {'Spikes': {'times': [1., np.nan]}, 'Position': {'MazeType': 'linear'}, 'Epochs': {}}
+    assert source_field_comparison(original, previous) == (1, True)
+    previous['Spikes']['times'] = [2., np.nan]
+    assert source_field_comparison(original, previous) == (1, False)
+    previous['Spikes'] = {}
+    assert source_field_comparison(original, previous) == (0, None)
+
+
+def test_optional_source_boolean_preserves_false_and_missing_separately():
+    assert optional_bool('False') is False
+    assert optional_bool('True') is True
+    assert optional_bool('') is None
+    with pytest.raises(ValueError):
+        optional_bool('unknown')

@@ -1,0 +1,14 @@
+{
+  "review_date": "2026-10-03",
+  "decision": "unresolved",
+  "exact_contrast": "Independently decoded bilateral CA1 spatial-content agreement in verified awake rest versus POST-NREM, calibrated for independent decoding error and distinct from ripple coincidence/phase locking.",
+  "reason": "Main texts and the pinned ripple-analysis code identify close precedents, but complete supplement/code and subsequent-study review is not yet independently closed. Absence from inspected text is not proof of novelty.",
+  "studies": [
+    {"study": "Grosmark and Buzsaki 2016", "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC4919122/", "inspected": "Main text and hc-11 documentation", "independent_bilateral_decoding": "not_established_by_review", "awake_vs_nrem_content_agreement": "not_established_by_review", "distinction": "PRE/POST sequence contributions and plastic/rigid populations; bilateral recording alone is not bilateral content agreement."},
+    {"study": "Carr et al. 2012", "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3428599/", "inspected": "Main text", "independent_bilateral_decoding": "requires_supplement_review", "awake_vs_nrem_content_agreement": "not_established_by_review", "distinction": "Cross-region/hemisphere slow-gamma coordination and awake replay quality; already establishes coordinated replay, not assumed new here."},
+    {"study": "Guan et al. 2021", "url": "https://www.nature.com/articles/s41467-021-26389-3", "inspected": "Main-text single-hemisphere decoding comparison", "independent_bilateral_decoding": "yes_single_hemisphere_quality", "awake_vs_nrem_content_agreement": "requires_supplement_code_review", "distinction": "Same/contralateral-cell replay quality and CA3 perturbation are close prior art; cannot claim first independent bilateral decoding."},
+    {"study": "Ripple synchrony reassessment 2025", "url": "https://doi.org/10.7554/eLife.106201.3", "inspected": "Main-text search and source code pinned at 870651d54b3b0a9ee016f4e30dfd35075d7d9755", "independent_bilateral_decoding": "not_in_inspected_analysis", "awake_vs_nrem_content_agreement": "not_in_inspected_analysis", "distinction": "Ripple event/amplitude coincidence, phase locking and spike locking are distinct from spatial content."},
+    {"study": "Elmaleh et al. 2023", "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10842454/", "inspected": "Main text", "independent_bilateral_decoding": "yes_vocal_templates", "awake_vs_nrem_content_agreement": "song_vs_sleep_not_CA1_spatial", "distinction": "Bilateral independent sleep content already shown in zebra-finch song system; excludes a broad first-shared-memory claim."}
+  ],
+  "open_items": ["Carr supplementary decoding population definition", "Guan supplementary/code state-stratified agreement", "Grosmark supplementary independent-hemisphere analyses", "Subsequent bilateral spatial-content literature and available code", "Independent review sign-off"]
+}
